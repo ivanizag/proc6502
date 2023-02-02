@@ -1,0 +1,8 @@
+Using gts for style, format and lint:
+    npm run lint
+    npm run fix
+
+https://github.com/google/gts
+
+Install nvm
+nvm instal v18
