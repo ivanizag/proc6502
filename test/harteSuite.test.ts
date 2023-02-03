@@ -34,9 +34,8 @@ describe('Harte suite for 6502', () => {
       const opcodeText = opcode.toString(16).toLowerCase().padStart(2);
       describe(`Test 0x${opcodeText}`, () => {
         const scenarios = loadTestData(opcodeText);
-        //const scenario = scenarios[0];
         scenarios.forEach((scenario, i) => {
-          if (i < 1) {
+          if (i < 1000) {
             test(scenario.name, () => {
               runScenario(scenario);
             });

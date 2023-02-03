@@ -10,6 +10,7 @@ export interface CpuState {
 
   v: number;
   w: number;
+  w_carry: boolean;
 
   opcode: number;
   steps: CpuAction[];
@@ -19,13 +20,13 @@ export interface CpuState {
 }
 
 const flagN = 1 << 7;
-const flagV = 1 << 6;
-const flag5 = 1 << 5;
-const flagB = 1 << 4;
-const flagD = 1 << 3;
-const flagI = 1 << 2;
+//const flagV = 1 << 6;
+//const flag5 = 1 << 5;
+//const flagB = 1 << 4;
+//const flagD = 1 << 3;
+//const flagI = 1 << 2;
 const flagZ = 1 << 1;
-const flagC = 1 << 0;
+//const flagC = 1 << 0;
 
 function setFlag(s: CpuState, flag: number) {
   s.p |= flag;
@@ -53,6 +54,7 @@ export function newCpuState(): CpuState {
     p: 0,
     v: 0,
     w: 0,
+    w_carry: false,
     opcode: 0,
     steps: [],
     step: 0,
@@ -65,7 +67,13 @@ enum Mode {
   Implicit,
   Immediate,
   ZeroPage,
+  ZeroPageX,
+  ZeroPageY,
   Absolute,
+  AbsoluteX,
+  AbsoluteY,
+  IndexedIndirectX,
+  IndirectIndexedY,
 }
 
 interface Instruction {
@@ -74,8 +82,8 @@ interface Instruction {
   steps: CpuAction[];
 }
 
-const incByte = (v: number) => (v + 1) % 256;
-const incWord = (v: number) => (v + 1) % 65536;
+//const incByte = (v: number) => (v + 1) & 0xff;
+const incWord = (v: number) => (v + 1) & 0xffff;
 
 export type CpuAction = (state: CpuState, bus: Bus) => void;
 
@@ -104,13 +112,16 @@ export function cycle(state: CpuState, bus: Bus) {
 
 const opDecode: CpuAction = (s, b) => {
   s.opcode = b.data;
+  if (!instructions[s.opcode]) {
+    console.log('Missing opcode: 0x' + s.opcode.toString(16));
+  }
   s.steps = instructions[s.opcode].steps;
   s.step = 0;
   s.pc = incWord(s.pc);
 };
 
 // Transfers
-const inc_pc: CpuAction = (s, _) => {
+const inc_pc: CpuAction = s => {
   s.pc = incWord(s.pc);
 };
 
@@ -133,28 +144,83 @@ const tr_bd_v: CpuAction = (s, b) => {
 const tr_bd_v_w: CpuAction = (s, b) => {
   s.w = s.v + (b.data << 8);
 };
-const tr_v_a: CpuAction = (s, _) => {
+const tr_v_a: CpuAction = s => {
   s.a = s.v;
 };
-const tr_v_x: CpuAction = (s, _) => {
+const tr_v_x: CpuAction = s => {
   s.x = s.v;
 };
-const tr_v_y: CpuAction = (s, _) => {
+const tr_v_y: CpuAction = s => {
   s.y = s.v;
 };
 
-const op_yield: CpuAction = (s, _) => {
-  s.yield = true;
+const add_x_w: CpuAction = (s, b) => {
+  const result = (s.w + s.x) & 0xffff;
+  s.w = (s.w & 0xff00) + ((s.w + s.x) & 0xff);
+  if (s.w !== result) {
+    // page boundary crossed
+    s.w_carry = true;
+    tr_w_ba(s, b);
+  }
+};
+
+const add_y_w: CpuAction = (s, b) => {
+  const result = (s.w + s.y) & 0xffff;
+  s.w = (s.w & 0xff00) + ((s.w + s.y) & 0xff);
+  if (s.w !== result) {
+    // page boundary crossed
+    s.w_carry = true;
+    tr_w_ba(s, b);
+  }
+};
+
+const add_x_v: CpuAction = s => {
+  s.v = (s.v + s.x) & 0xff;
+};
+
+const add_y_v: CpuAction = s => {
+  s.v = (s.v + s.y) & 0xff;
+};
+
+const add_w_carry: CpuAction = s => {
+  if (s.w_carry) {
+    s.w = (s.w + 0x100) & 0xffff;
+  }
 };
 
 // Flags
-const fl_ZN: CpuAction = (s, _) => {
+const fl_ZN: CpuAction = s => {
   updateFlag(s, flagZ, s.v === 0);
   updateFlag(s, flagN, s.v >= 1 << 7);
 };
 
 const group_immediate = [tr_pc_ba, inc_pc, tr_bd_v, fl_ZN];
 const group_zeropage = [tr_pc_ba, inc_pc, tr_bd_v, tr_v_ba, tr_bd_v, fl_ZN];
+const group_zeropageX = [
+  tr_pc_ba,
+  inc_pc,
+  tr_bd_v,
+  tr_v_ba,
+
+  add_x_v,
+
+  tr_v_ba,
+  tr_bd_v,
+  fl_ZN,
+];
+const group_zeropageY = [
+  tr_pc_ba,
+  inc_pc,
+  tr_bd_v,
+  tr_v_ba,
+
+  add_y_v,
+
+  tr_v_ba,
+  tr_bd_v,
+  fl_ZN,
+];
+
 const group_absolute = [
   tr_pc_ba,
   inc_pc,
@@ -162,6 +228,37 @@ const group_absolute = [
   tr_pc_ba,
   inc_pc,
   tr_bd_v_w,
+
+  tr_w_ba,
+  tr_bd_v,
+  fl_ZN,
+];
+const group_absoluteX = [
+  tr_pc_ba,
+  inc_pc,
+  tr_bd_v,
+  tr_pc_ba,
+  inc_pc,
+  tr_bd_v_w,
+
+  add_x_w,
+  add_w_carry,
+
+  tr_w_ba,
+  tr_bd_v,
+  fl_ZN,
+];
+const group_absoluteY = [
+  tr_pc_ba,
+  inc_pc,
+  tr_bd_v,
+  tr_pc_ba,
+  inc_pc,
+  tr_bd_v_w,
+
+  add_y_w,
+  add_w_carry,
+
   tr_w_ba,
   tr_bd_v,
   fl_ZN,
@@ -174,13 +271,24 @@ function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
 // TODO: remove this expport once completed.
 export const instructions: {[id: number]: Instruction} = {
   0xea: Inst('NOP', Mode.Implicit, [tr_pc_ba]),
+
   0xa9: Inst('LDA', Mode.Immediate, [...group_immediate, tr_v_a]),
-  0xa2: Inst('LDX', Mode.Immediate, [...group_immediate, tr_v_x]),
-  0xa0: Inst('LDY', Mode.Immediate, [...group_immediate, tr_v_y]),
   0xa5: Inst('LDA', Mode.ZeroPage, [...group_zeropage, tr_v_a]),
-  0xa6: Inst('LDX', Mode.ZeroPage, [...group_zeropage, tr_v_x]),
-  0xa4: Inst('LDY', Mode.ZeroPage, [...group_zeropage, tr_v_y]),
+  0xb5: Inst('LDA', Mode.ZeroPageX, [...group_zeropageX, tr_v_a]),
   0xad: Inst('LDA', Mode.Absolute, [...group_absolute, tr_v_a]),
+  0xbd: Inst('LDA', Mode.AbsoluteX, [...group_absoluteX, tr_v_a]),
+  0xb9: Inst('LDA', Mode.AbsoluteY, [...group_absoluteY, tr_v_a]),
+  //0xa1: Inst('LDA', Mode.IndexedIndirectX, [...group_indexed_indirectX, tr_v_a]),
+  //0xb1: Inst('LDA', Mode.IndirectIndexedY, [...group_indirect_indexedY, tr_v_a]),
+
+  0xbe: Inst('LDX', Mode.AbsoluteY, [...group_absoluteY, tr_v_x]),
+  0xa2: Inst('LDX', Mode.Immediate, [...group_immediate, tr_v_x]),
+  0xa6: Inst('LDX', Mode.ZeroPage, [...group_zeropage, tr_v_x]),
+  0xb6: Inst('LDX', Mode.ZeroPageY, [...group_zeropageY, tr_v_x]),
   0xae: Inst('LDX', Mode.Absolute, [...group_absolute, tr_v_x]),
+  0xa0: Inst('LDY', Mode.Immediate, [...group_immediate, tr_v_y]),
+  0xa4: Inst('LDY', Mode.ZeroPage, [...group_zeropage, tr_v_y]),
+  0xb4: Inst('LDY', Mode.ZeroPageX, [...group_zeropageX, tr_v_y]),
   0xac: Inst('LDY', Mode.Absolute, [...group_absolute, tr_v_y]),
+  0xbc: Inst('LDY', Mode.AbsoluteX, [...group_absoluteX, tr_v_y]),
 };
