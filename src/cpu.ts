@@ -9,7 +9,9 @@ export interface CpuState {
   p: number;
 
   v: number;
+  v2: number;
   w: number;
+  wlo: number;
   w_carry: boolean;
 
   opcode: number;
@@ -53,7 +55,9 @@ export function newCpuState(): CpuState {
     y: 0,
     p: 0,
     v: 0,
+    v2: 0,
     w: 0,
+    wlo: 0,
     w_carry: false,
     opcode: 0,
     steps: [],
@@ -82,7 +86,7 @@ interface Instruction {
   steps: CpuAction[];
 }
 
-//const incByte = (v: number) => (v + 1) & 0xff;
+const incByte = (v: number) => (v + 1) & 0xff;
 const incWord = (v: number) => (v + 1) & 0xffff;
 
 export type CpuAction = (state: CpuState, bus: Bus) => void;
@@ -101,7 +105,8 @@ export function cycle(state: CpuState, bus: Bus) {
 
   if (!state.yield) {
     state.steps = [];
-    tr_pc_ba(state, bus);
+    tr_pc_w(state, bus);
+    yield_read(state, bus);
     if (state.trace) console.log('Next operation', state, bus);
   }
 
@@ -114,44 +119,70 @@ const opDecode: CpuAction = (s, b) => {
   s.opcode = b.data;
   if (!instructions[s.opcode]) {
     console.log('Missing opcode: 0x' + s.opcode.toString(16));
+    return; //TODO
   }
   s.steps = instructions[s.opcode].steps;
   s.step = 0;
   s.pc = incWord(s.pc);
 };
 
-// Transfers
 const inc_pc: CpuAction = s => {
   s.pc = incWord(s.pc);
 };
+const inc_w: CpuAction = s => {
+  s.w = incWord(s.w);
+};
 
-const tr_pc_ba: CpuAction = (s, b) => {
-  b.address = s.pc;
-  s.yield = true;
-};
-const tr_v_ba: CpuAction = (s, b) => {
-  b.address = s.v;
-  s.yield = true;
-};
-const tr_w_ba: CpuAction = (s, b) => {
+const yield_read: CpuAction = (s, b) => {
   b.address = s.w;
+  b.isWrite = false;
+  s.yield = true;
+};
+const yield_write: CpuAction = (s, b) => {
+  b.address = s.w;
+  b.isWrite = true;
   s.yield = true;
 };
 
-const tr_bd_v: CpuAction = (s, b) => {
+const load_v: CpuAction = (s, b) => {
   s.v = b.data;
 };
-const tr_bd_v_w: CpuAction = (s, b) => {
-  s.w = s.v + (b.data << 8);
+const store_v: CpuAction = (s, b) => {
+  b.data = s.v;
 };
+
 const tr_v_a: CpuAction = s => {
   s.a = s.v;
+};
+const tr_a_v: CpuAction = s => {
+  s.v = s.a;
 };
 const tr_v_x: CpuAction = s => {
   s.x = s.v;
 };
+const tr_x_v: CpuAction = s => {
+  s.v = s.x;
+};
 const tr_v_y: CpuAction = s => {
   s.y = s.v;
+};
+const tr_y_v: CpuAction = s => {
+  s.v = s.y;
+};
+const tr_pc_w: CpuAction = s => {
+  s.w = s.pc;
+};
+const tr_v_w: CpuAction = s => {
+  s.w = s.v;
+};
+const tr_v_v2: CpuAction = s => {
+  s.v2 = s.v;
+};
+const tr_v_v2hi: CpuAction = s => {
+  s.v2 = (s.v2 & 0xff) + (s.v << 8);
+};
+const tr_v2_w: CpuAction = s => {
+  s.w = s.v2;
 };
 
 const add_x_w: CpuAction = (s, b) => {
@@ -160,7 +191,7 @@ const add_x_w: CpuAction = (s, b) => {
   if (s.w !== result) {
     // page boundary crossed
     s.w_carry = true;
-    tr_w_ba(s, b);
+    yield_read(s, b);
   }
 };
 
@@ -170,16 +201,15 @@ const add_y_w: CpuAction = (s, b) => {
   if (s.w !== result) {
     // page boundary crossed
     s.w_carry = true;
-    tr_w_ba(s, b);
+    yield_read(s, b);
   }
 };
 
-const add_x_v: CpuAction = s => {
-  s.v = (s.v + s.x) & 0xff;
-};
-
-const add_y_v: CpuAction = s => {
-  s.v = (s.v + s.y) & 0xff;
+const no_carry_optimization: CpuAction = (s, b) => {
+  if (!s.w_carry) {
+    // Loose a cycle anyway
+    yield_read(s, b);
+  }
 };
 
 const add_w_carry: CpuAction = s => {
@@ -188,81 +218,33 @@ const add_w_carry: CpuAction = s => {
   }
 };
 
+const add_v_w_lo: CpuAction = s => {
+  s.w = (s.w + s.v) & 0xff;
+};
+
 // Flags
 const fl_ZN: CpuAction = s => {
   updateFlag(s, flagZ, s.v === 0);
   updateFlag(s, flagN, s.v >= 1 << 7);
 };
 
-const group_immediate = [tr_pc_ba, inc_pc, tr_bd_v, fl_ZN];
-const group_zeropage = [tr_pc_ba, inc_pc, tr_bd_v, tr_v_ba, tr_bd_v, fl_ZN];
-const group_zeropageX = [
-  tr_pc_ba,
-  inc_pc,
-  tr_bd_v,
-  tr_v_ba,
+// Reoad or write using w, v and v2
+const group_load = [yield_read, load_v, fl_ZN];
+const group_write = [store_v, yield_write];
 
-  add_x_v,
+const group_load_v2 = [yield_read, load_v, tr_v_v2, inc_w, yield_read, load_v, tr_v_v2hi];
+const group_param_lo_to_w = [tr_pc_w, inc_pc, yield_read, load_v, tr_v_w];
+const group_param_to_w = [tr_pc_w, inc_pc, inc_pc, ...group_load_v2, tr_v2_w];
 
-  tr_v_ba,
-  tr_bd_v,
-  fl_ZN,
-];
-const group_zeropageY = [
-  tr_pc_ba,
-  inc_pc,
-  tr_bd_v,
-  tr_v_ba,
-
-  add_y_v,
-
-  tr_v_ba,
-  tr_bd_v,
-  fl_ZN,
-];
-
-const group_absolute = [
-  tr_pc_ba,
-  inc_pc,
-  tr_bd_v,
-  tr_pc_ba,
-  inc_pc,
-  tr_bd_v_w,
-
-  tr_w_ba,
-  tr_bd_v,
-  fl_ZN,
-];
-const group_absoluteX = [
-  tr_pc_ba,
-  inc_pc,
-  tr_bd_v,
-  tr_pc_ba,
-  inc_pc,
-  tr_bd_v_w,
-
-  add_x_w,
-  add_w_carry,
-
-  tr_w_ba,
-  tr_bd_v,
-  fl_ZN,
-];
-const group_absoluteY = [
-  tr_pc_ba,
-  inc_pc,
-  tr_bd_v,
-  tr_pc_ba,
-  inc_pc,
-  tr_bd_v_w,
-
-  add_y_w,
-  add_w_carry,
-
-  tr_w_ba,
-  tr_bd_v,
-  fl_ZN,
-];
+const group_immediate = [tr_pc_w, inc_pc];
+const group_zeropage = [...group_param_lo_to_w];
+const group_zeropageX = [...group_param_lo_to_w, yield_read, tr_x_v, add_v_w_lo];
+const group_zeropageY = [...group_param_lo_to_w, yield_read, tr_y_v, add_v_w_lo];
+const group_absolute = [...group_param_to_w];
+const group_absoluteX = [...group_param_to_w, add_x_w, add_w_carry];
+const group_absoluteY = [...group_param_to_w, add_y_w, add_w_carry];
+const group_absoluteXSlow = [...group_param_to_w, add_x_w, no_carry_optimization, add_w_carry];
+const group_absoluteYSlow = [...group_param_to_w, add_y_w, no_carry_optimization, add_w_carry];
 
 function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
   return {name, mode, steps};
@@ -270,25 +252,38 @@ function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
 
 // TODO: remove this expport once completed.
 export const instructions: {[id: number]: Instruction} = {
-  0xea: Inst('NOP', Mode.Implicit, [tr_pc_ba]),
+  0xea: Inst('NOP', Mode.Implicit, [tr_pc_w, yield_read]),
 
-  0xa9: Inst('LDA', Mode.Immediate, [...group_immediate, tr_v_a]),
-  0xa5: Inst('LDA', Mode.ZeroPage, [...group_zeropage, tr_v_a]),
-  0xb5: Inst('LDA', Mode.ZeroPageX, [...group_zeropageX, tr_v_a]),
-  0xad: Inst('LDA', Mode.Absolute, [...group_absolute, tr_v_a]),
-  0xbd: Inst('LDA', Mode.AbsoluteX, [...group_absoluteX, tr_v_a]),
-  0xb9: Inst('LDA', Mode.AbsoluteY, [...group_absoluteY, tr_v_a]),
-  //0xa1: Inst('LDA', Mode.IndexedIndirectX, [...group_indexed_indirectX, tr_v_a]),
+  0xa9: Inst('LDA', Mode.Immediate, [...group_immediate, ...group_load, tr_v_a]),
+  0xa5: Inst('LDA', Mode.ZeroPage, [...group_zeropage, ...group_load, tr_v_a]),
+  0xb5: Inst('LDA', Mode.ZeroPageX, [...group_zeropageX, ...group_load, tr_v_a]),
+  0xad: Inst('LDA', Mode.Absolute, [...group_absolute, ...group_load, tr_v_a]),
+  0xbd: Inst('LDA', Mode.AbsoluteX, [...group_absoluteX, ...group_load, tr_v_a]),
+  0xb9: Inst('LDA', Mode.AbsoluteY, [...group_absoluteY, ...group_load, tr_v_a]),
+  //0xa1: Inst('LDA', Mode.IndexedIndirectX, [...group_indexed_indirectX, tr_v_a,]),
   //0xb1: Inst('LDA', Mode.IndirectIndexedY, [...group_indirect_indexedY, tr_v_a]),
+  0xbe: Inst('LDX', Mode.AbsoluteY, [...group_absoluteY, ...group_load, tr_v_x]),
+  0xa2: Inst('LDX', Mode.Immediate, [...group_immediate, ...group_load, tr_v_x]),
+  0xa6: Inst('LDX', Mode.ZeroPage, [...group_zeropage, ...group_load, tr_v_x]),
+  0xb6: Inst('LDX', Mode.ZeroPageY, [...group_zeropageY, ...group_load, tr_v_x]),
+  0xae: Inst('LDX', Mode.Absolute, [...group_absolute, ...group_load, tr_v_x]),
+  0xa0: Inst('LDY', Mode.Immediate, [...group_immediate, ...group_load, tr_v_y]),
+  0xa4: Inst('LDY', Mode.ZeroPage, [...group_zeropage, ...group_load, tr_v_y]),
+  0xb4: Inst('LDY', Mode.ZeroPageX, [...group_zeropageX, ...group_load, tr_v_y]),
+  0xac: Inst('LDY', Mode.Absolute, [...group_absolute, ...group_load, tr_v_y]),
+  0xbc: Inst('LDY', Mode.AbsoluteX, [...group_absoluteX, ...group_load, tr_v_y]),
 
-  0xbe: Inst('LDX', Mode.AbsoluteY, [...group_absoluteY, tr_v_x]),
-  0xa2: Inst('LDX', Mode.Immediate, [...group_immediate, tr_v_x]),
-  0xa6: Inst('LDX', Mode.ZeroPage, [...group_zeropage, tr_v_x]),
-  0xb6: Inst('LDX', Mode.ZeroPageY, [...group_zeropageY, tr_v_x]),
-  0xae: Inst('LDX', Mode.Absolute, [...group_absolute, tr_v_x]),
-  0xa0: Inst('LDY', Mode.Immediate, [...group_immediate, tr_v_y]),
-  0xa4: Inst('LDY', Mode.ZeroPage, [...group_zeropage, tr_v_y]),
-  0xb4: Inst('LDY', Mode.ZeroPageX, [...group_zeropageX, tr_v_y]),
-  0xac: Inst('LDY', Mode.Absolute, [...group_absolute, tr_v_y]),
-  0xbc: Inst('LDY', Mode.AbsoluteX, [...group_absoluteX, tr_v_y]),
+  0x85: Inst('STA', Mode.ZeroPage, [...group_zeropage, tr_a_v, ...group_write]),
+  0x95: Inst('STA', Mode.ZeroPageX, [...group_zeropageX, tr_a_v, ...group_write]),
+  0x8d: Inst('STA', Mode.Absolute, [...group_absolute, tr_a_v, ...group_write]),
+  0x9d: Inst('STA', Mode.AbsoluteX, [...group_absoluteXSlow, tr_a_v, ...group_write]),
+  0x99: Inst('STA', Mode.AbsoluteY, [...group_absoluteYSlow, tr_a_v, ...group_write]),
+  //0x81: Inst('STA', Mode.IndexedIndirectX, [...group_, tr_a_v, ...group_write]),
+  //0x91: Inst('STA', Mode.IndirectIndexedY, [...group_, tr_a_v, ...group_write]),
+  0x86: Inst('STX', Mode.ZeroPage, [...group_zeropage, tr_x_v, ...group_write]),
+  0x96: Inst('STX', Mode.ZeroPageY, [...group_zeropageY, tr_x_v, ...group_write]),
+  0x8e: Inst('STX', Mode.Absolute, [...group_absolute, tr_x_v, ...group_write]),
+  0x84: Inst('STY', Mode.ZeroPage, [...group_zeropage, tr_y_v, ...group_write]),
+  0x94: Inst('STY', Mode.ZeroPageX, [...group_zeropageX, tr_y_v, ...group_write]),
+  0x8c: Inst('STY', Mode.Absolute, [...group_absolute, tr_y_v, ...group_write]),
 };
