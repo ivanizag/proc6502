@@ -28,11 +28,11 @@ function loadTestData(opcode: string): Scenario[] {
   return JSON.parse(content) as Scenario[];
 }
 
+//const single: number | undefined = 0x91;
 const single: number | undefined = undefined;
 
 describe('Harte suite for 6502', () => {
   for (let opcode = 0; opcode < 256; opcode++) {
-    //if (opcode === 0x85) {
     if ((opcode in instructions && !single) || opcode === single) {
       const opcodeText = opcode.toString(16).toLowerCase().padStart(2);
       describe(`Test 0x${opcodeText}`, () => {
@@ -81,7 +81,7 @@ function runScenario(scenario: Scenario) {
   }
 
   // Check cycles
-  if (single) {
+  if (single /*&& scenario.name === "91 fc 44"*/) {
     console.log(scenario);
     console.log(receivedCycles);
     console.log(scenario.cycles);
