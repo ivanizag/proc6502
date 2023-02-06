@@ -28,7 +28,7 @@ function loadTestData(opcode: string): Scenario[] {
   return JSON.parse(content) as Scenario[];
 }
 
-//const single: number | undefined = 0x28;
+//const single: number | undefined = 0x60;
 const single: number | undefined = undefined;
 
 describe('Harte suite for 6502', () => {

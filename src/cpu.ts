@@ -169,7 +169,12 @@ const to_y: CpuAction = s => {
 const to_sp: CpuAction = s => {
   s.sp = s.v;
 };
-
+const to_pc_lo: CpuAction = s => {
+  s.pc = (s.pc & 0xff00) + s.v;
+};
+const to_pc_hi: CpuAction = s => {
+  s.pc = (s.v << 8) + (s.pc & 0xff);
+};
 
 const from_a: CpuAction = s => {
   s.v = s.a;
@@ -183,7 +188,12 @@ const from_y: CpuAction = s => {
 const from_sp: CpuAction = s => {
   s.v = s.sp;
 };
-
+const from_pc_lo: CpuAction = s => {
+  s.v = s.pc & 0xff;
+};
+const from_pc_hi: CpuAction = s => {
+  s.v = s.pc >> 8;
+};
 
 const tr_p_v: CpuAction = s => {
   s.v = s.p | (flag5 + flagB);
@@ -214,12 +224,6 @@ const tr_v_v2hi: CpuAction = s => {
 };
 const tr_v2_w: CpuAction = s => {
   s.w = s.v2;
-};
-const tr_pc_lo_v: CpuAction = s => {
-  s.v = s.pc & 0xff;
-};
-const tr_pc_hi_v: CpuAction = s => {
-  s.v = s.pc >> 8;
 };
 
 const add_v_w: CpuAction = (s, b) => {
@@ -283,8 +287,9 @@ const dummy_cycle = [tr_pc_w, ...read];
 const dummy_sp_cycle = [tr_sp_w, ...read];
 
 const push = [tr_push_w, write];
-const pull = [...dummy_sp_cycle, tr_pull_w, ...read];
-const push_pc = [...dummy_sp_cycle, tr_pc_hi_v, ...push, tr_pc_lo_v, ...push];
+const pull = [tr_pull_w, ...read];
+const push_pc = [...dummy_sp_cycle, from_pc_hi, ...push, from_pc_lo, ...push];
+const pull_pc = [...dummy_sp_cycle, ...pull, to_pc_lo, ...pull, to_pc_hi, ...dummy_cycle];
 
 const load_v2_hi = [...read, tr_v_v2];
 const load_v2_lo = [...read, tr_v_v2hi, tr_v2_w];
@@ -316,6 +321,7 @@ const mode_indirect_indexedYSlow = [
 ];
 
 const opJSR = [tr_pc_w, inc_pc, ...load_v2_hi, ...push_pc, tr_pc_w, inc_pc, ...load_v2_lo];
+const opRTS = [...dummy_cycle, ...pull_pc, inc_pc];
 
 function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
   return {name, mode, steps};
@@ -368,11 +374,12 @@ export const instructions: {[id: number]: Instruction} = {
   0x4c: Inst('JMP', Mode.Absolute, [...mode_absolute, tr_w_pc]),
   0x6c: Inst('JMP', Mode.Indirect, [...mode_indirect, tr_w_pc]),
   0x20: Inst('JSR', Mode.Absolute, [...opJSR, tr_w_pc]),
+  0x60: Inst('RTS', Mode.Implicit, [...opRTS]),
 
   0x48: Inst('PHA', Mode.Implicit, [...dummy_cycle, from_a, ...push]),
   0x08: Inst('PHP', Mode.Implicit, [...dummy_cycle, tr_p_v, ...push]),
-  0x68: Inst('PLA', Mode.Implicit, [...dummy_cycle, ...pull, fl_ZN, to_a]),
-  0x28: Inst('PLP', Mode.Implicit, [...dummy_cycle, ...pull, tr_v_p]),
+  0x68: Inst('PLA', Mode.Implicit, [...dummy_cycle, ...dummy_sp_cycle, ...pull, fl_ZN, to_a]),
+  0x28: Inst('PLP', Mode.Implicit, [...dummy_cycle, ...dummy_sp_cycle, ...pull, tr_v_p]),
 
   0x38: Inst('SEC', Mode.Implicit, [buildSetFlag(flagC), ...dummy_cycle]),
   0xf8: Inst('SED', Mode.Implicit, [buildSetFlag(flagD), ...dummy_cycle]),
