@@ -28,13 +28,13 @@ function loadTestData(opcode: string): Scenario[] {
   return JSON.parse(content) as Scenario[];
 }
 
-//const single: number | undefined = 0xaa;
+//const single: number | undefined = 0x28;
 const single: number | undefined = undefined;
 
 describe('Harte suite for 6502', () => {
   for (let opcode = 0; opcode < 256; opcode++) {
     if ((opcode in instructions && !single) || opcode === single) {
-      const opcodeText = opcode.toString(16).toLowerCase().padStart(2);
+      const opcodeText = opcode.toString(16).toLowerCase().padStart(2, '0');
       describe(`Test 0x${opcodeText}`, () => {
         const scenarios = loadTestData(opcodeText);
         scenarios.forEach((scenario, i) => {
@@ -101,4 +101,7 @@ function runScenario(scenario: Scenario) {
     const value = (ram.find(v => v[0] === pair[0]) || [0])[1];
     expect(value).toBe(pair[1]);
   });
+
+  // Check correct cycle count
+  expect(state.steps.length).toBe(0);
 }

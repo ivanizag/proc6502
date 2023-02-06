@@ -22,8 +22,8 @@ export interface CpuState {
 
 const flagN = 1 << 7;
 //const flagV = 1 << 6;
-//const flag5 = 1 << 5;
-//const flagB = 1 << 4;
+const flag5 = 1 << 5;
+const flagB = 1 << 4;
 //const flagD = 1 << 3;
 //const flagI = 1 << 2;
 const flagZ = 1 << 1;
@@ -74,6 +74,7 @@ enum Mode {
   Absolute,
   AbsoluteX,
   AbsoluteY,
+  Indirect,
   IndexedIndirectX,
   IndirectIndexedY,
 }
@@ -130,6 +131,9 @@ const inc_pc: CpuAction = s => {
 const inc_w: CpuAction = s => {
   s.w = incWord(s.w);
 };
+const inc_w_no_cross_page: CpuAction = s => {
+  s.w = (s.w & 0xff00) + ((s.w+1) & 0xff);
+};
 const page_zero: CpuAction = s => {
   s.w = s.w & 0xff;
 };
@@ -176,8 +180,20 @@ const tr_v_sp: CpuAction = s => {
 const tr_sp_v: CpuAction = s => {
   s.v = s.sp;
 };
+const tr_p_v: CpuAction = s => {
+  s.v = s.p | (flag5 + flagB);
+}
+const tr_v_p: CpuAction = s => {
+  s.p = (s.v | flag5) & ~flagB;
+}
 const tr_pc_w: CpuAction = s => {
   s.w = s.pc;
+};
+const tr_w_pc: CpuAction = s => {
+  s.pc = s.w;
+};
+const tr_sp_w: CpuAction = s => {
+  s.w = s.sp + 0x100;
 };
 const tr_v_w: CpuAction = s => {
   s.w = s.v;
@@ -219,20 +235,38 @@ const add_v_w_lo: CpuAction = s => {
   s.w = (s.w + s.v) & 0xff;
 };
 
+const tr_push_w: CpuAction = s => {
+  s.w = 0x100 + s.sp;
+  s.sp = (s.sp-1) & 0xff;
+}
+
+const tr_pull_w: CpuAction = s => {
+  s.sp = (s.sp+1) & 0xff;
+  s.w = 0x100 + s.sp;
+}
+
 // Flags
 const fl_ZN: CpuAction = s => {
   updateFlag(s, flagZ, s.v === 0);
   updateFlag(s, flagN, s.v >= 1 << 7);
 };
 
-// Reoad or write using w, v and v2
+// Reoad or write using w, v
 const mode_read = [yield_read, load_v, fl_ZN];
 const mode_write = [store_v, yield_write];
 
-const mode_load_v2 = [yield_read, load_v, tr_v_v2, inc_w, yield_read, load_v, tr_v_v2hi];
-const mode_load_v2_page_zero = [yield_read, load_v, tr_v_v2, inc_w, page_zero, yield_read, load_v, tr_v_v2hi];
+const dummy_cycle = [tr_pc_w, yield_read];
+const dummy_sp_cycle = [tr_sp_w, yield_read];
+const push = [...dummy_cycle, tr_push_w, store_v, yield_write];
+const pull = [...dummy_cycle, ...dummy_sp_cycle, tr_pull_w, yield_read, load_v];
+
+
+const mode_load_w = [yield_read, load_v, tr_v_v2, inc_w, yield_read, load_v, tr_v_v2hi, tr_v2_w];
+const mode_load_w_no_cross_oage = [yield_read, load_v, tr_v_v2, inc_w_no_cross_page, yield_read, load_v, tr_v_v2hi, tr_v2_w];
+const mode_load_w_page_zero = [yield_read, load_v, tr_v_v2, inc_w, page_zero, yield_read, load_v, tr_v_v2hi, tr_v2_w];
+
 const mode_param_lo_to_w = [tr_pc_w, inc_pc, yield_read, load_v, tr_v_w];
-const mode_param_to_w = [tr_pc_w, inc_pc, inc_pc, ...mode_load_v2, tr_v2_w];
+const mode_param_to_w = [tr_pc_w, inc_pc, inc_pc, ...mode_load_w];
 
 const mode_immediate = [tr_pc_w, inc_pc];
 const mode_zeropage = [...mode_param_lo_to_w];
@@ -245,32 +279,33 @@ const mode_absoluteY = [...mode_param_to_w, tr_y_v, add_v_w, add_w_carry];
 const mode_absoluteXSlow = [...mode_param_to_w, tr_x_v, add_v_w, no_carry_optimization, add_w_carry];
 const mode_absoluteYSlow = [...mode_param_to_w, tr_y_v, add_v_w, no_carry_optimization, add_w_carry];
 
+const mode_indirect = [...mode_param_to_w, ...mode_load_w_no_cross_oage];
+
 const mode_indexed_indirectX = [
   ...mode_param_lo_to_w,
   yield_read,
   tr_x_v,
   add_v_w_lo,
-  ...mode_load_v2_page_zero,
-  tr_v2_w,
+  ...mode_load_w_page_zero,
 ];
 
 const mode_indirect_indexedY = [
   ...mode_param_lo_to_w,
-  ...mode_load_v2_page_zero,
-  tr_v2_w,
+  ...mode_load_w_page_zero,
   tr_y_v,
   add_v_w,
   add_w_carry,
 ];
 const mode_indirect_indexedYSlow = [
   ...mode_param_lo_to_w,
-  ...mode_load_v2_page_zero,
-  tr_v2_w,
+  ...mode_load_w_page_zero,
   tr_y_v,
   add_v_w,
   no_carry_optimization,
   add_w_carry,
 ];
+
+
 
 function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
   return {name, mode, steps};
@@ -278,7 +313,7 @@ function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
 
 // TODO: remove this expport once completed.
 export const instructions: {[id: number]: Instruction} = {
-  0xea: Inst('NOP', Mode.Implicit, [tr_pc_w, yield_read]),
+  0xea: Inst('NOP', Mode.Implicit, [...dummy_cycle]),
 
   0xa9: Inst('LDA', Mode.Immediate, [...mode_immediate, ...mode_read, tr_v_a]),
   0xa5: Inst('LDA', Mode.ZeroPage, [...mode_zeropage, ...mode_read, tr_v_a]),
@@ -313,11 +348,19 @@ export const instructions: {[id: number]: Instruction} = {
   0x94: Inst('STY', Mode.ZeroPageX, [...mode_zeropageX, tr_y_v, ...mode_write]),
   0x8c: Inst('STY', Mode.Absolute, [...mode_absolute, tr_y_v, ...mode_write]),
 
-  0xaa: Inst('TAX', Mode.Implicit, [tr_a_v, fl_ZN, tr_v_x, tr_pc_w, yield_read]),
-	0xa8: Inst('TAY', Mode.Implicit, [tr_a_v, fl_ZN, tr_v_y, tr_pc_w, yield_read]),
-	0x8a: Inst('TXA', Mode.Implicit, [tr_x_v, fl_ZN, tr_v_a, tr_pc_w, yield_read]),
-	0x98: Inst('TYA', Mode.Implicit, [tr_y_v, fl_ZN, tr_v_a, tr_pc_w, yield_read]),
-	0x9a: Inst('TXS', Mode.Implicit, [tr_x_v, tr_v_sp, tr_pc_w, yield_read]),
-	0xba: Inst('TSX', Mode.Implicit, [tr_sp_v, fl_ZN, tr_v_x, tr_pc_w, yield_read]),
+  0xaa: Inst('TAX', Mode.Implicit, [tr_a_v, fl_ZN, tr_v_x, ...dummy_cycle]),
+  0xa8: Inst('TAY', Mode.Implicit, [tr_a_v, fl_ZN, tr_v_y, ...dummy_cycle]),
+  0x8a: Inst('TXA', Mode.Implicit, [tr_x_v, fl_ZN, tr_v_a, ...dummy_cycle]),
+  0x98: Inst('TYA', Mode.Implicit, [tr_y_v, fl_ZN, tr_v_a, ...dummy_cycle]),
+  0x9a: Inst('TXS', Mode.Implicit, [tr_x_v, tr_v_sp, ...dummy_cycle]),
+  0xba: Inst('TSX', Mode.Implicit, [tr_sp_v, fl_ZN, tr_v_x, ...dummy_cycle]),
+
+  0x4c: Inst('JMP', Mode.Absolute, [...mode_absolute, tr_w_pc]),
+  0x6c: Inst('JMP', Mode.Indirect, [...mode_indirect, tr_w_pc]),
+
+  0x48: Inst('PHA', Mode.Implicit, [tr_a_v, ...push]),
+  0x08: Inst('PHP', Mode.Implicit, [tr_p_v, ...push]),
+  0x68: Inst('PLA', Mode.Implicit, [...pull, fl_ZN, tr_v_a, ]),
+  0x28: Inst('PLP', Mode.Implicit, [...pull, tr_v_p]),
 
 };
