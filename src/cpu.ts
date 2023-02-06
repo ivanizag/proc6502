@@ -170,6 +170,12 @@ const tr_v_y: CpuAction = s => {
 const tr_y_v: CpuAction = s => {
   s.v = s.y;
 };
+const tr_v_sp: CpuAction = s => {
+  s.sp = s.v;
+};
+const tr_sp_v: CpuAction = s => {
+  s.v = s.sp;
+};
 const tr_pc_w: CpuAction = s => {
   s.w = s.pc;
 };
@@ -306,4 +312,12 @@ export const instructions: {[id: number]: Instruction} = {
   0x84: Inst('STY', Mode.ZeroPage, [...mode_zeropage, tr_y_v, ...mode_write]),
   0x94: Inst('STY', Mode.ZeroPageX, [...mode_zeropageX, tr_y_v, ...mode_write]),
   0x8c: Inst('STY', Mode.Absolute, [...mode_absolute, tr_y_v, ...mode_write]),
+
+  0xaa: Inst('TAX', Mode.Implicit, [tr_a_v, fl_ZN, tr_v_x, tr_pc_w, yield_read]),
+	0xa8: Inst('TAY', Mode.Implicit, [tr_a_v, fl_ZN, tr_v_y, tr_pc_w, yield_read]),
+	0x8a: Inst('TXA', Mode.Implicit, [tr_x_v, fl_ZN, tr_v_a, tr_pc_w, yield_read]),
+	0x98: Inst('TYA', Mode.Implicit, [tr_y_v, fl_ZN, tr_v_a, tr_pc_w, yield_read]),
+	0x9a: Inst('TXS', Mode.Implicit, [tr_x_v, tr_v_sp, tr_pc_w, yield_read]),
+	0xba: Inst('TSX', Mode.Implicit, [tr_sp_v, fl_ZN, tr_v_x, tr_pc_w, yield_read]),
+
 };
