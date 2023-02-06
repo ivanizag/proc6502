@@ -21,13 +21,13 @@ export interface CpuState {
 }
 
 const flagN = 1 << 7;
-//const flagV = 1 << 6;
+const flagV = 1 << 6;
 const flag5 = 1 << 5;
 const flagB = 1 << 4;
-//const flagD = 1 << 3;
-//const flagI = 1 << 2;
+const flagD = 1 << 3;
+const flagI = 1 << 2;
 const flagZ = 1 << 1;
-//const flagC = 1 << 0;
+const flagC = 1 << 0;
 
 function setFlag(s: CpuState, flag: number) {
   s.p |= flag;
@@ -132,7 +132,7 @@ const inc_w: CpuAction = s => {
   s.w = incWord(s.w);
 };
 const inc_w_no_cross_page: CpuAction = s => {
-  s.w = (s.w & 0xff00) + ((s.w+1) & 0xff);
+  s.w = (s.w & 0xff00) + ((s.w + 1) & 0xff);
 };
 const page_zero: CpuAction = s => {
   s.w = s.w & 0xff;
@@ -182,10 +182,10 @@ const tr_sp_v: CpuAction = s => {
 };
 const tr_p_v: CpuAction = s => {
   s.v = s.p | (flag5 + flagB);
-}
+};
 const tr_v_p: CpuAction = s => {
   s.p = (s.v | flag5) & ~flagB;
-}
+};
 const tr_pc_w: CpuAction = s => {
   s.w = s.pc;
 };
@@ -237,13 +237,27 @@ const add_v_w_lo: CpuAction = s => {
 
 const tr_push_w: CpuAction = s => {
   s.w = 0x100 + s.sp;
-  s.sp = (s.sp-1) & 0xff;
-}
+  s.sp = (s.sp - 1) & 0xff;
+};
 
 const tr_pull_w: CpuAction = s => {
-  s.sp = (s.sp+1) & 0xff;
+  s.sp = (s.sp + 1) & 0xff;
   s.w = 0x100 + s.sp;
-}
+};
+
+const buildSetFlag = (flag: number) => {
+  const op: CpuAction = s => {
+    setFlag(s, flag);
+  };
+  return op;
+};
+
+const buildClearFlag = (flag: number) => {
+  const op: CpuAction = s => {
+    clearFlag(s, flag);
+  };
+  return op;
+};
 
 // Flags
 const fl_ZN: CpuAction = s => {
@@ -260,9 +274,17 @@ const dummy_sp_cycle = [tr_sp_w, yield_read];
 const push = [...dummy_cycle, tr_push_w, store_v, yield_write];
 const pull = [...dummy_cycle, ...dummy_sp_cycle, tr_pull_w, yield_read, load_v];
 
-
 const mode_load_w = [yield_read, load_v, tr_v_v2, inc_w, yield_read, load_v, tr_v_v2hi, tr_v2_w];
-const mode_load_w_no_cross_oage = [yield_read, load_v, tr_v_v2, inc_w_no_cross_page, yield_read, load_v, tr_v_v2hi, tr_v2_w];
+const mode_load_w_no_cross_oage = [
+  yield_read,
+  load_v,
+  tr_v_v2,
+  inc_w_no_cross_page,
+  yield_read,
+  load_v,
+  tr_v_v2hi,
+  tr_v2_w,
+];
 const mode_load_w_page_zero = [yield_read, load_v, tr_v_v2, inc_w, page_zero, yield_read, load_v, tr_v_v2hi, tr_v2_w];
 
 const mode_param_lo_to_w = [tr_pc_w, inc_pc, yield_read, load_v, tr_v_w];
@@ -281,21 +303,9 @@ const mode_absoluteYSlow = [...mode_param_to_w, tr_y_v, add_v_w, no_carry_optimi
 
 const mode_indirect = [...mode_param_to_w, ...mode_load_w_no_cross_oage];
 
-const mode_indexed_indirectX = [
-  ...mode_param_lo_to_w,
-  yield_read,
-  tr_x_v,
-  add_v_w_lo,
-  ...mode_load_w_page_zero,
-];
+const mode_indexed_indirectX = [...mode_param_lo_to_w, yield_read, tr_x_v, add_v_w_lo, ...mode_load_w_page_zero];
 
-const mode_indirect_indexedY = [
-  ...mode_param_lo_to_w,
-  ...mode_load_w_page_zero,
-  tr_y_v,
-  add_v_w,
-  add_w_carry,
-];
+const mode_indirect_indexedY = [...mode_param_lo_to_w, ...mode_load_w_page_zero, tr_y_v, add_v_w, add_w_carry];
 const mode_indirect_indexedYSlow = [
   ...mode_param_lo_to_w,
   ...mode_load_w_page_zero,
@@ -304,8 +314,6 @@ const mode_indirect_indexedYSlow = [
   no_carry_optimization,
   add_w_carry,
 ];
-
-
 
 function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
   return {name, mode, steps};
@@ -360,7 +368,14 @@ export const instructions: {[id: number]: Instruction} = {
 
   0x48: Inst('PHA', Mode.Implicit, [tr_a_v, ...push]),
   0x08: Inst('PHP', Mode.Implicit, [tr_p_v, ...push]),
-  0x68: Inst('PLA', Mode.Implicit, [...pull, fl_ZN, tr_v_a, ]),
+  0x68: Inst('PLA', Mode.Implicit, [...pull, fl_ZN, tr_v_a]),
   0x28: Inst('PLP', Mode.Implicit, [...pull, tr_v_p]),
 
+  0x38: Inst('SEC', Mode.Implicit, [buildSetFlag(flagC), ...dummy_cycle]),
+  0xf8: Inst('SED', Mode.Implicit, [buildSetFlag(flagD), ...dummy_cycle]),
+  0x78: Inst('SEI', Mode.Implicit, [buildSetFlag(flagI), ...dummy_cycle]),
+  0x18: Inst('CLC', Mode.Implicit, [buildClearFlag(flagC), ...dummy_cycle]),
+  0xd8: Inst('CLD', Mode.Implicit, [buildClearFlag(flagD), ...dummy_cycle]),
+  0x58: Inst('CLI', Mode.Implicit, [buildClearFlag(flagI), ...dummy_cycle]),
+  0xb8: Inst('CLV', Mode.Implicit, [buildClearFlag(flagV), ...dummy_cycle]),
 };
