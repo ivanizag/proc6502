@@ -138,63 +138,71 @@ const page_zero: CpuAction = s => {
   s.w = s.w & 0xff;
 };
 
+// Bus interaction
 const yield_read: CpuAction = (s, b) => {
   b.address = s.w;
   b.isWrite = false;
   s.yield = true;
 };
-const yield_write: CpuAction = (s, b) => {
+const load_v: CpuAction = (s, b) => {
+  s.v = b.data;
+};
+const read = [yield_read, load_v];
+
+const write: CpuAction = (s, b) => {
+  b.data = s.v;
   b.address = s.w;
   b.isWrite = true;
   s.yield = true;
 };
 
-const load_v: CpuAction = (s, b) => {
-  s.v = b.data;
-};
-const store_v: CpuAction = (s, b) => {
-  b.data = s.v;
-};
-
-const tr_v_a: CpuAction = s => {
+// Transfers
+const to_a: CpuAction = s => {
   s.a = s.v;
 };
-const tr_a_v: CpuAction = s => {
-  s.v = s.a;
-};
-const tr_v_x: CpuAction = s => {
+const to_x: CpuAction = s => {
   s.x = s.v;
 };
-const tr_x_v: CpuAction = s => {
-  s.v = s.x;
-};
-const tr_v_y: CpuAction = s => {
+const to_y: CpuAction = s => {
   s.y = s.v;
 };
-const tr_y_v: CpuAction = s => {
-  s.v = s.y;
-};
-const tr_v_sp: CpuAction = s => {
+const to_sp: CpuAction = s => {
   s.sp = s.v;
 };
-const tr_sp_v: CpuAction = s => {
+
+
+const from_a: CpuAction = s => {
+  s.v = s.a;
+};
+const from_x: CpuAction = s => {
+  s.v = s.x;
+};
+const from_y: CpuAction = s => {
+  s.v = s.y;
+};
+const from_sp: CpuAction = s => {
   s.v = s.sp;
 };
+
+
 const tr_p_v: CpuAction = s => {
   s.v = s.p | (flag5 + flagB);
 };
 const tr_v_p: CpuAction = s => {
   s.p = (s.v | flag5) & ~flagB;
 };
+
 const tr_pc_w: CpuAction = s => {
   s.w = s.pc;
 };
 const tr_w_pc: CpuAction = s => {
   s.pc = s.w;
 };
+
 const tr_sp_w: CpuAction = s => {
   s.w = s.sp + 0x100;
 };
+
 const tr_v_w: CpuAction = s => {
   s.w = s.v;
 };
@@ -206,6 +214,12 @@ const tr_v_v2hi: CpuAction = s => {
 };
 const tr_v2_w: CpuAction = s => {
   s.w = s.v2;
+};
+const tr_pc_lo_v: CpuAction = s => {
+  s.v = s.pc & 0xff;
+};
+const tr_pc_hi_v: CpuAction = s => {
+  s.v = s.pc >> 8;
 };
 
 const add_v_w: CpuAction = (s, b) => {
@@ -265,55 +279,43 @@ const fl_ZN: CpuAction = s => {
   updateFlag(s, flagN, s.v >= 1 << 7);
 };
 
-// Reoad or write using w, v
-const mode_read = [yield_read, load_v, fl_ZN];
-const mode_write = [store_v, yield_write];
+const dummy_cycle = [tr_pc_w, ...read];
+const dummy_sp_cycle = [tr_sp_w, ...read];
 
-const dummy_cycle = [tr_pc_w, yield_read];
-const dummy_sp_cycle = [tr_sp_w, yield_read];
-const push = [...dummy_cycle, tr_push_w, store_v, yield_write];
-const pull = [...dummy_cycle, ...dummy_sp_cycle, tr_pull_w, yield_read, load_v];
+const push = [tr_push_w, write];
+const pull = [...dummy_sp_cycle, tr_pull_w, ...read];
+const push_pc = [...dummy_sp_cycle, tr_pc_hi_v, ...push, tr_pc_lo_v, ...push];
 
-const mode_load_w = [yield_read, load_v, tr_v_v2, inc_w, yield_read, load_v, tr_v_v2hi, tr_v2_w];
-const mode_load_w_no_cross_oage = [
-  yield_read,
-  load_v,
-  tr_v_v2,
-  inc_w_no_cross_page,
-  yield_read,
-  load_v,
-  tr_v_v2hi,
-  tr_v2_w,
-];
-const mode_load_w_page_zero = [yield_read, load_v, tr_v_v2, inc_w, page_zero, yield_read, load_v, tr_v_v2hi, tr_v2_w];
+const load_v2_hi = [...read, tr_v_v2];
+const load_v2_lo = [...read, tr_v_v2hi, tr_v2_w];
+const load_w_no_cross_page = [...load_v2_hi, inc_w_no_cross_page, ...load_v2_lo];
+const load_w_page_zero = [...load_v2_hi, inc_w, page_zero, ...load_v2_lo];
 
-const mode_param_lo_to_w = [tr_pc_w, inc_pc, yield_read, load_v, tr_v_w];
-const mode_param_to_w = [tr_pc_w, inc_pc, inc_pc, ...mode_load_w];
+const param_zp_to_w = [tr_pc_w, inc_pc, ...read, tr_v_w];
+const param_to_w = [tr_pc_w, inc_pc, ...load_v2_hi, tr_pc_w, inc_pc, ...load_v2_lo];
 
 const mode_immediate = [tr_pc_w, inc_pc];
-const mode_zeropage = [...mode_param_lo_to_w];
-const mode_zeropageX = [...mode_param_lo_to_w, yield_read, tr_x_v, add_v_w_lo];
-const mode_zeropageY = [...mode_param_lo_to_w, yield_read, tr_y_v, add_v_w_lo];
-const mode_absolute = [...mode_param_to_w];
-const mode_absoluteX = [...mode_param_to_w, tr_x_v, add_v_w, add_w_carry];
-const mode_absoluteY = [...mode_param_to_w, tr_y_v, add_v_w, add_w_carry];
-
-const mode_absoluteXSlow = [...mode_param_to_w, tr_x_v, add_v_w, no_carry_optimization, add_w_carry];
-const mode_absoluteYSlow = [...mode_param_to_w, tr_y_v, add_v_w, no_carry_optimization, add_w_carry];
-
-const mode_indirect = [...mode_param_to_w, ...mode_load_w_no_cross_oage];
-
-const mode_indexed_indirectX = [...mode_param_lo_to_w, yield_read, tr_x_v, add_v_w_lo, ...mode_load_w_page_zero];
-
-const mode_indirect_indexedY = [...mode_param_lo_to_w, ...mode_load_w_page_zero, tr_y_v, add_v_w, add_w_carry];
+const mode_zeropage = [...param_zp_to_w];
+const mode_zeropageX = [...param_zp_to_w, ...read, from_x, add_v_w_lo];
+const mode_zeropageY = [...param_zp_to_w, ...read, from_y, add_v_w_lo];
+const mode_absolute = [...param_to_w];
+const mode_absoluteX = [...param_to_w, from_x, add_v_w, add_w_carry];
+const mode_absoluteY = [...param_to_w, from_y, add_v_w, add_w_carry];
+const mode_absoluteXSlow = [...param_to_w, from_x, add_v_w, no_carry_optimization, add_w_carry];
+const mode_absoluteYSlow = [...param_to_w, from_y, add_v_w, no_carry_optimization, add_w_carry];
+const mode_indirect = [...param_to_w, ...load_w_no_cross_page];
+const mode_indexed_indirectX = [...param_zp_to_w, ...read, from_x, add_v_w_lo, ...load_w_page_zero];
+const mode_indirect_indexedY = [...param_zp_to_w, ...load_w_page_zero, from_y, add_v_w, add_w_carry];
 const mode_indirect_indexedYSlow = [
-  ...mode_param_lo_to_w,
-  ...mode_load_w_page_zero,
-  tr_y_v,
+  ...param_zp_to_w,
+  ...load_w_page_zero,
+  from_y,
   add_v_w,
   no_carry_optimization,
   add_w_carry,
 ];
+
+const opJSR = [tr_pc_w, inc_pc, ...load_v2_hi, ...push_pc, tr_pc_w, inc_pc, ...load_v2_lo];
 
 function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
   return {name, mode, steps};
@@ -323,53 +325,54 @@ function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
 export const instructions: {[id: number]: Instruction} = {
   0xea: Inst('NOP', Mode.Implicit, [...dummy_cycle]),
 
-  0xa9: Inst('LDA', Mode.Immediate, [...mode_immediate, ...mode_read, tr_v_a]),
-  0xa5: Inst('LDA', Mode.ZeroPage, [...mode_zeropage, ...mode_read, tr_v_a]),
-  0xb5: Inst('LDA', Mode.ZeroPageX, [...mode_zeropageX, ...mode_read, tr_v_a]),
-  0xad: Inst('LDA', Mode.Absolute, [...mode_absolute, ...mode_read, tr_v_a]),
-  0xbd: Inst('LDA', Mode.AbsoluteX, [...mode_absoluteX, ...mode_read, tr_v_a]),
-  0xb9: Inst('LDA', Mode.AbsoluteY, [...mode_absoluteY, ...mode_read, tr_v_a]),
-  0xa1: Inst('LDA', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...mode_read, tr_v_a]),
-  0xb1: Inst('LDA', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...mode_read, tr_v_a]),
-  0xbe: Inst('LDX', Mode.AbsoluteY, [...mode_absoluteY, ...mode_read, tr_v_x]),
-  0xa2: Inst('LDX', Mode.Immediate, [...mode_immediate, ...mode_read, tr_v_x]),
-  0xa6: Inst('LDX', Mode.ZeroPage, [...mode_zeropage, ...mode_read, tr_v_x]),
-  0xb6: Inst('LDX', Mode.ZeroPageY, [...mode_zeropageY, ...mode_read, tr_v_x]),
-  0xae: Inst('LDX', Mode.Absolute, [...mode_absolute, ...mode_read, tr_v_x]),
-  0xa0: Inst('LDY', Mode.Immediate, [...mode_immediate, ...mode_read, tr_v_y]),
-  0xa4: Inst('LDY', Mode.ZeroPage, [...mode_zeropage, ...mode_read, tr_v_y]),
-  0xb4: Inst('LDY', Mode.ZeroPageX, [...mode_zeropageX, ...mode_read, tr_v_y]),
-  0xac: Inst('LDY', Mode.Absolute, [...mode_absolute, ...mode_read, tr_v_y]),
-  0xbc: Inst('LDY', Mode.AbsoluteX, [...mode_absoluteX, ...mode_read, tr_v_y]),
+  0xa9: Inst('LDA', Mode.Immediate, [...mode_immediate, ...read, fl_ZN, to_a]),
+  0xa5: Inst('LDA', Mode.ZeroPage, [...mode_zeropage, ...read, fl_ZN, to_a]),
+  0xb5: Inst('LDA', Mode.ZeroPageX, [...mode_zeropageX, ...read, fl_ZN, to_a]),
+  0xad: Inst('LDA', Mode.Absolute, [...mode_absolute, ...read, fl_ZN, to_a]),
+  0xbd: Inst('LDA', Mode.AbsoluteX, [...mode_absoluteX, ...read, fl_ZN, to_a]),
+  0xb9: Inst('LDA', Mode.AbsoluteY, [...mode_absoluteY, ...read, fl_ZN, to_a]),
+  0xa1: Inst('LDA', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...read, fl_ZN, to_a]),
+  0xb1: Inst('LDA', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...read, fl_ZN, to_a]),
+  0xbe: Inst('LDX', Mode.AbsoluteY, [...mode_absoluteY, ...read, fl_ZN, to_x]),
+  0xa2: Inst('LDX', Mode.Immediate, [...mode_immediate, ...read, fl_ZN, to_x]),
+  0xa6: Inst('LDX', Mode.ZeroPage, [...mode_zeropage, ...read, fl_ZN, to_x]),
+  0xb6: Inst('LDX', Mode.ZeroPageY, [...mode_zeropageY, ...read, fl_ZN, to_x]),
+  0xae: Inst('LDX', Mode.Absolute, [...mode_absolute, ...read, fl_ZN, to_x]),
+  0xa0: Inst('LDY', Mode.Immediate, [...mode_immediate, ...read, fl_ZN, to_y]),
+  0xa4: Inst('LDY', Mode.ZeroPage, [...mode_zeropage, ...read, fl_ZN, to_y]),
+  0xb4: Inst('LDY', Mode.ZeroPageX, [...mode_zeropageX, ...read, fl_ZN, to_y]),
+  0xac: Inst('LDY', Mode.Absolute, [...mode_absolute, ...read, fl_ZN, to_y]),
+  0xbc: Inst('LDY', Mode.AbsoluteX, [...mode_absoluteX, ...read, fl_ZN, to_y]),
 
-  0x85: Inst('STA', Mode.ZeroPage, [...mode_zeropage, tr_a_v, ...mode_write]),
-  0x95: Inst('STA', Mode.ZeroPageX, [...mode_zeropageX, tr_a_v, ...mode_write]),
-  0x8d: Inst('STA', Mode.Absolute, [...mode_absolute, tr_a_v, ...mode_write]),
-  0x9d: Inst('STA', Mode.AbsoluteX, [...mode_absoluteXSlow, tr_a_v, ...mode_write]),
-  0x99: Inst('STA', Mode.AbsoluteY, [...mode_absoluteYSlow, tr_a_v, ...mode_write]),
-  0x81: Inst('STA', Mode.IndexedIndirectX, [...mode_indexed_indirectX, tr_a_v, ...mode_write]),
-  0x91: Inst('STA', Mode.IndirectIndexedY, [...mode_indirect_indexedYSlow, tr_a_v, ...mode_write]),
-  0x86: Inst('STX', Mode.ZeroPage, [...mode_zeropage, tr_x_v, ...mode_write]),
-  0x96: Inst('STX', Mode.ZeroPageY, [...mode_zeropageY, tr_x_v, ...mode_write]),
-  0x8e: Inst('STX', Mode.Absolute, [...mode_absolute, tr_x_v, ...mode_write]),
-  0x84: Inst('STY', Mode.ZeroPage, [...mode_zeropage, tr_y_v, ...mode_write]),
-  0x94: Inst('STY', Mode.ZeroPageX, [...mode_zeropageX, tr_y_v, ...mode_write]),
-  0x8c: Inst('STY', Mode.Absolute, [...mode_absolute, tr_y_v, ...mode_write]),
+  0x85: Inst('STA', Mode.ZeroPage, [...mode_zeropage, from_a, write]),
+  0x95: Inst('STA', Mode.ZeroPageX, [...mode_zeropageX, from_a, write]),
+  0x8d: Inst('STA', Mode.Absolute, [...mode_absolute, from_a, write]),
+  0x9d: Inst('STA', Mode.AbsoluteX, [...mode_absoluteXSlow, from_a, write]),
+  0x99: Inst('STA', Mode.AbsoluteY, [...mode_absoluteYSlow, from_a, write]),
+  0x81: Inst('STA', Mode.IndexedIndirectX, [...mode_indexed_indirectX, from_a, write]),
+  0x91: Inst('STA', Mode.IndirectIndexedY, [...mode_indirect_indexedYSlow, from_a, write]),
+  0x86: Inst('STX', Mode.ZeroPage, [...mode_zeropage, from_x, write]),
+  0x96: Inst('STX', Mode.ZeroPageY, [...mode_zeropageY, from_x, write]),
+  0x8e: Inst('STX', Mode.Absolute, [...mode_absolute, from_x, write]),
+  0x84: Inst('STY', Mode.ZeroPage, [...mode_zeropage, from_y, write]),
+  0x94: Inst('STY', Mode.ZeroPageX, [...mode_zeropageX, from_y, write]),
+  0x8c: Inst('STY', Mode.Absolute, [...mode_absolute, from_y, write]),
 
-  0xaa: Inst('TAX', Mode.Implicit, [tr_a_v, fl_ZN, tr_v_x, ...dummy_cycle]),
-  0xa8: Inst('TAY', Mode.Implicit, [tr_a_v, fl_ZN, tr_v_y, ...dummy_cycle]),
-  0x8a: Inst('TXA', Mode.Implicit, [tr_x_v, fl_ZN, tr_v_a, ...dummy_cycle]),
-  0x98: Inst('TYA', Mode.Implicit, [tr_y_v, fl_ZN, tr_v_a, ...dummy_cycle]),
-  0x9a: Inst('TXS', Mode.Implicit, [tr_x_v, tr_v_sp, ...dummy_cycle]),
-  0xba: Inst('TSX', Mode.Implicit, [tr_sp_v, fl_ZN, tr_v_x, ...dummy_cycle]),
+  0xaa: Inst('TAX', Mode.Implicit, [from_a, fl_ZN, to_x, ...dummy_cycle]),
+  0xa8: Inst('TAY', Mode.Implicit, [from_a, fl_ZN, to_y, ...dummy_cycle]),
+  0x8a: Inst('TXA', Mode.Implicit, [from_x, fl_ZN, to_a, ...dummy_cycle]),
+  0x98: Inst('TYA', Mode.Implicit, [from_y, fl_ZN, to_a, ...dummy_cycle]),
+  0x9a: Inst('TXS', Mode.Implicit, [from_x, to_sp, ...dummy_cycle]),
+  0xba: Inst('TSX', Mode.Implicit, [from_sp, fl_ZN, to_x, ...dummy_cycle]),
 
   0x4c: Inst('JMP', Mode.Absolute, [...mode_absolute, tr_w_pc]),
   0x6c: Inst('JMP', Mode.Indirect, [...mode_indirect, tr_w_pc]),
+  0x20: Inst('JSR', Mode.Absolute, [...opJSR, tr_w_pc]),
 
-  0x48: Inst('PHA', Mode.Implicit, [tr_a_v, ...push]),
-  0x08: Inst('PHP', Mode.Implicit, [tr_p_v, ...push]),
-  0x68: Inst('PLA', Mode.Implicit, [...pull, fl_ZN, tr_v_a]),
-  0x28: Inst('PLP', Mode.Implicit, [...pull, tr_v_p]),
+  0x48: Inst('PHA', Mode.Implicit, [...dummy_cycle, from_a, ...push]),
+  0x08: Inst('PHP', Mode.Implicit, [...dummy_cycle, tr_p_v, ...push]),
+  0x68: Inst('PLA', Mode.Implicit, [...dummy_cycle, ...pull, fl_ZN, to_a]),
+  0x28: Inst('PLP', Mode.Implicit, [...dummy_cycle, ...pull, tr_v_p]),
 
   0x38: Inst('SEC', Mode.Implicit, [buildSetFlag(flagC), ...dummy_cycle]),
   0xf8: Inst('SED', Mode.Implicit, [buildSetFlag(flagD), ...dummy_cycle]),
