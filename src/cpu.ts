@@ -12,6 +12,7 @@ export interface CpuState {
   v2: number;
   w: number;
   w_carry: boolean;
+  pc_target: undefined | number;
 
   opcode: number;
   steps: CpuAction[];
@@ -28,6 +29,10 @@ const flagD = 1 << 3;
 const flagI = 1 << 2;
 const flagZ = 1 << 1;
 const flagC = 1 << 0;
+
+function getFlag(s: CpuState, flag: number): boolean {
+  return (s.p & flag) !== 0;
+}
 
 function setFlag(s: CpuState, flag: number) {
   s.p |= flag;
@@ -57,6 +62,7 @@ export function newCpuState(): CpuState {
     v2: 0,
     w: 0,
     w_carry: false,
+    pc_target: undefined,
     opcode: 0,
     steps: [],
     step: 0,
@@ -77,6 +83,7 @@ enum Mode {
   Indirect,
   IndexedIndirectX,
   IndirectIndexedY,
+  Relative,
 }
 
 interface Instruction {
@@ -281,6 +288,37 @@ const buildClear = (flag: number) => {
   return op;
 };
 
+const buildBranch = (flag: number, test: boolean) => {
+  const op: CpuAction = (s, b) => {
+    if (getFlag(s, flag) === test) {
+      const offset = s.v > 127 ? s.v - 256 : s.v;
+      s.pc_target = (s.pc + offset) & 0xffff;
+      s.w = s.pc;
+      yield_read(s, b);
+    }
+  };
+
+  const br_in_page: CpuAction = (s, b) => {
+    if (s.pc_target !== undefined) {
+      s.pc = (s.pc & 0xff00) + (s.pc_target & 0xff);
+      s.w = s.pc;
+      if (s.pc !== s.pc_target) {
+        s.w = s.pc;
+        yield_read(s, b);
+      }
+    }
+  };
+
+  const br_page: CpuAction = s => {
+    if (s.pc_target !== undefined && s.pc !== s.pc_target) {
+      s.pc = s.pc_target;
+    }
+    s.pc_target = undefined;
+  };
+
+  return [op, br_in_page, br_page];
+};
+
 const set_w = (address: number) => {
   const op: CpuAction = s => {
     s.w = address;
@@ -299,7 +337,7 @@ const dummy_sp_cycle = [tr_sp_w, ...read];
 
 const push = [tr_push_w, write];
 const pull = [tr_pull_w, ...read];
-const pre_pull = [...dummy_cycle, ...dummy_sp_cycle];
+const pre_pull = [...dummy_sp_cycle];
 const push_pc = [from_pc_hi, ...push, from_pc_lo, ...push];
 const pull_pc = [...pull, to_pc_lo, ...pull, to_pc_hi];
 
@@ -311,7 +349,9 @@ const load_w_page_zero = [...load_v2_hi, inc_w, page_zero, ...load_v2_lo];
 const param_zp_to_w = [tr_pc_w_inc, ...read, tr_v_w];
 const param_to_w = [tr_pc_w_inc, inc_pc, ...load_w];
 
+const mode_implicit = [...dummy_cycle];
 const mode_immediate = [tr_pc_w_inc];
+const mode_relative = [tr_pc_w_inc, ...read];
 const mode_zeropage = [...param_zp_to_w];
 const mode_zeropageX = [...param_zp_to_w, ...read, from_x, add_v_w_lo];
 const mode_zeropageY = [...param_zp_to_w, ...read, from_y, add_v_w_lo];
@@ -329,9 +369,9 @@ function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
   return {name, mode, steps};
 }
 
-// TODO: remove this expport once completed.
+// TODO: remove this export once completed.
 export const instructions: {[id: number]: Instruction} = {
-  0xea: Inst('NOP', Mode.Implicit, [...dummy_cycle]),
+  0xea: Inst('NOP', Mode.Implicit, [...mode_implicit]),
 
   0xa9: Inst('LDA', Mode.Immediate, [...mode_immediate, ...read, fl_ZN, to_a]),
   0xa5: Inst('LDA', Mode.ZeroPage, [...mode_zeropage, ...read, fl_ZN, to_a]),
@@ -366,30 +406,39 @@ export const instructions: {[id: number]: Instruction} = {
   0x94: Inst('STY', Mode.ZeroPageX, [...mode_zeropageX, from_y, write]),
   0x8c: Inst('STY', Mode.Absolute, [...mode_absolute, from_y, write]),
 
-  0xaa: Inst('TAX', Mode.Implicit, [from_a, fl_ZN, to_x, ...dummy_cycle]),
-  0xa8: Inst('TAY', Mode.Implicit, [from_a, fl_ZN, to_y, ...dummy_cycle]),
-  0x8a: Inst('TXA', Mode.Implicit, [from_x, fl_ZN, to_a, ...dummy_cycle]),
-  0x98: Inst('TYA', Mode.Implicit, [from_y, fl_ZN, to_a, ...dummy_cycle]),
-  0x9a: Inst('TXS', Mode.Implicit, [from_x, to_sp, ...dummy_cycle]),
-  0xba: Inst('TSX', Mode.Implicit, [from_sp, fl_ZN, to_x, ...dummy_cycle]),
+  0xaa: Inst('TAX', Mode.Implicit, [...mode_implicit, from_a, fl_ZN, to_x]),
+  0xa8: Inst('TAY', Mode.Implicit, [...mode_implicit, from_a, fl_ZN, to_y]),
+  0x8a: Inst('TXA', Mode.Implicit, [...mode_implicit, from_x, fl_ZN, to_a]),
+  0x98: Inst('TYA', Mode.Implicit, [...mode_implicit, from_y, fl_ZN, to_a]),
+  0x9a: Inst('TXS', Mode.Implicit, [...mode_implicit, from_x, to_sp]),
+  0xba: Inst('TSX', Mode.Implicit, [...mode_implicit, from_sp, fl_ZN, to_x]),
 
-  0x00: Inst('BRK', Mode.Implicit, [...dummy_cycle, inc_pc, ...push_pc, from_p, ...push, set_w(0xfffe), ...load_w, tr_w_pc, buildSet(flagI)]),
+  0x00: Inst('BRK', Mode.Implicit, [...mode_implicit, inc_pc, ...push_pc, from_p, ...push, set_w(0xfffe), ...load_w, tr_w_pc, buildSet(flagI)]),
   0x4c: Inst('JMP', Mode.Absolute, [...mode_absolute, tr_w_pc]),
   0x6c: Inst('JMP', Mode.Indirect, [...mode_indirect, tr_w_pc]),
-  0x20: Inst('JSR', Mode.Absolute, [tr_pc_w_inc, ...load_v2_hi, ...dummy_sp_cycle, ...push_pc, tr_pc_w_inc, ...load_v2_lo, tr_w_pc]),
-  0x40: Inst('RTI', Mode.Implicit, [...pre_pull, ...pull, to_p, ...pull_pc]),
-  0x60: Inst('RTS', Mode.Implicit, [...pre_pull, ...pull_pc, ...dummy_cycle, inc_pc]),
+  0x20: Inst('JSR', Mode.Absolute, [tr_pc_w_inc, ...load_v2_hi, ...pre_pull, ...push_pc, tr_pc_w_inc, ...load_v2_lo, tr_w_pc]),
+  0x40: Inst('RTI', Mode.Implicit, [...mode_implicit, ...pre_pull, ...pull, to_p, ...pull_pc]),
+  0x60: Inst('RTS', Mode.Implicit, [...mode_implicit, ...pre_pull, ...pull_pc, ...dummy_cycle, inc_pc]),
 
-  0x48: Inst('PHA', Mode.Implicit, [...dummy_cycle, from_a, ...push]),
-  0x08: Inst('PHP', Mode.Implicit, [...dummy_cycle, from_p, ...push]),
-  0x68: Inst('PLA', Mode.Implicit, [...pre_pull, ...pull, fl_ZN, to_a]),
-  0x28: Inst('PLP', Mode.Implicit, [...pre_pull, ...pull, to_p]),
+  0x48: Inst('PHA', Mode.Implicit, [...mode_implicit, from_a, ...push]),
+  0x08: Inst('PHP', Mode.Implicit, [...mode_implicit, from_p, ...push]),
+  0x68: Inst('PLA', Mode.Implicit, [...mode_implicit, ...pre_pull, ...pull, fl_ZN, to_a]),
+  0x28: Inst('PLP', Mode.Implicit, [...mode_implicit, ...pre_pull, ...pull, to_p]),
 
-  0x38: Inst('SEC', Mode.Implicit, [buildSet(flagC), ...dummy_cycle]),
-  0xf8: Inst('SED', Mode.Implicit, [buildSet(flagD), ...dummy_cycle]),
-  0x78: Inst('SEI', Mode.Implicit, [buildSet(flagI), ...dummy_cycle]),
-  0x18: Inst('CLC', Mode.Implicit, [buildClear(flagC), ...dummy_cycle]),
-  0xd8: Inst('CLD', Mode.Implicit, [buildClear(flagD), ...dummy_cycle]),
-  0x58: Inst('CLI', Mode.Implicit, [buildClear(flagI), ...dummy_cycle]),
-  0xb8: Inst('CLV', Mode.Implicit, [buildClear(flagV), ...dummy_cycle]),
+  0x38: Inst('SEC', Mode.Implicit, [...mode_implicit, buildSet(flagC)]),
+  0xf8: Inst('SED', Mode.Implicit, [...mode_implicit, buildSet(flagD)]),
+  0x78: Inst('SEI', Mode.Implicit, [...mode_implicit, buildSet(flagI)]),
+  0x18: Inst('CLC', Mode.Implicit, [...mode_implicit, buildClear(flagC)]),
+  0xd8: Inst('CLD', Mode.Implicit, [...mode_implicit, buildClear(flagD)]),
+  0x58: Inst('CLI', Mode.Implicit, [...mode_implicit, buildClear(flagI)]),
+  0xb8: Inst('CLV', Mode.Implicit, [...mode_implicit, buildClear(flagV)]),
+
+  0x90: Inst('BCC', Mode.Relative, [...mode_relative, ...buildBranch(flagC, false)]),
+  0xb0: Inst('BCS', Mode.Relative, [...mode_relative, ...buildBranch(flagC, true)]),
+  0xd0: Inst('BNE', Mode.Relative, [...mode_relative, ...buildBranch(flagZ, false)]),
+  0xf0: Inst('BEQ', Mode.Relative, [...mode_relative, ...buildBranch(flagZ, true)]),
+  0x10: Inst('BPL', Mode.Relative, [...mode_relative, ...buildBranch(flagN, false)]),
+  0x30: Inst('BMI', Mode.Relative, [...mode_relative, ...buildBranch(flagN, true)]),
+  0x50: Inst('BVC', Mode.Relative, [...mode_relative, ...buildBranch(flagV, false)]),
+  0x70: Inst('BVS', Mode.Relative, [...mode_relative, ...buildBranch(flagV, true)]),
 };
