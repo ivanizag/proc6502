@@ -116,7 +116,7 @@ export function cycle(state: CpuState, bus: Bus) {
 const opDecode: CpuAction = (s, b) => {
   s.opcode = b.data;
   if (!instructions[s.opcode]) {
-    console.log('Missing opcode: 0x' + s.opcode.toString(16));
+    console.log('Missing opcode');
     return; //TODO
   }
   s.steps = instructions[s.opcode].steps;
@@ -205,6 +205,10 @@ const tr_v_p: CpuAction = s => {
 const tr_pc_w: CpuAction = s => {
   s.w = s.pc;
 };
+const tr_pc_w_inc: CpuAction = s => {
+  s.w = s.pc;
+  s.pc = incWord(s.pc);
+};
 const tr_w_pc: CpuAction = s => {
   s.pc = s.w;
 };
@@ -288,18 +292,19 @@ const dummy_sp_cycle = [tr_sp_w, ...read];
 
 const push = [tr_push_w, write];
 const pull = [tr_pull_w, ...read];
+const pre_pull = [...dummy_cycle, ...dummy_sp_cycle];
 const push_pc = [...dummy_sp_cycle, from_pc_hi, ...push, from_pc_lo, ...push];
-const pull_pc = [...dummy_sp_cycle, ...pull, to_pc_lo, ...pull, to_pc_hi, ...dummy_cycle];
+const pull_pc = [/*...dummy_sp_cycle,*/ ...pull, to_pc_lo, ...pull, to_pc_hi, /*...dummy_cycle*/];
 
 const load_v2_hi = [...read, tr_v_v2];
 const load_v2_lo = [...read, tr_v_v2hi, tr_v2_w];
 const load_w_no_cross_page = [...load_v2_hi, inc_w_no_cross_page, ...load_v2_lo];
 const load_w_page_zero = [...load_v2_hi, inc_w, page_zero, ...load_v2_lo];
 
-const param_zp_to_w = [tr_pc_w, inc_pc, ...read, tr_v_w];
-const param_to_w = [tr_pc_w, inc_pc, ...load_v2_hi, tr_pc_w, inc_pc, ...load_v2_lo];
+const param_zp_to_w = [tr_pc_w_inc, ...read, tr_v_w];
+const param_to_w = [tr_pc_w_inc, ...load_v2_hi, tr_pc_w_inc, ...load_v2_lo];
 
-const mode_immediate = [tr_pc_w, inc_pc];
+const mode_immediate = [tr_pc_w_inc];
 const mode_zeropage = [...param_zp_to_w];
 const mode_zeropageX = [...param_zp_to_w, ...read, from_x, add_v_w_lo];
 const mode_zeropageY = [...param_zp_to_w, ...read, from_y, add_v_w_lo];
@@ -319,9 +324,6 @@ const mode_indirect_indexedYSlow = [
   no_carry_optimization,
   add_w_carry,
 ];
-
-const opJSR = [tr_pc_w, inc_pc, ...load_v2_hi, ...push_pc, tr_pc_w, inc_pc, ...load_v2_lo];
-const opRTS = [...dummy_cycle, ...pull_pc, inc_pc];
 
 function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
   return {name, mode, steps};
@@ -373,13 +375,14 @@ export const instructions: {[id: number]: Instruction} = {
 
   0x4c: Inst('JMP', Mode.Absolute, [...mode_absolute, tr_w_pc]),
   0x6c: Inst('JMP', Mode.Indirect, [...mode_indirect, tr_w_pc]),
-  0x20: Inst('JSR', Mode.Absolute, [...opJSR, tr_w_pc]),
-  0x60: Inst('RTS', Mode.Implicit, [...opRTS]),
+  0x20: Inst('JSR', Mode.Absolute, [tr_pc_w_inc, ...load_v2_hi, ...push_pc, tr_pc_w_inc, ...load_v2_lo, tr_w_pc]),
+  0x40: Inst('RTI', Mode.Implicit, [...pre_pull, ...pull, tr_v_p, ...pull_pc]),
+  0x60: Inst('RTS', Mode.Implicit, [...pre_pull, ...pull_pc, ...dummy_cycle, inc_pc]),
 
   0x48: Inst('PHA', Mode.Implicit, [...dummy_cycle, from_a, ...push]),
   0x08: Inst('PHP', Mode.Implicit, [...dummy_cycle, tr_p_v, ...push]),
-  0x68: Inst('PLA', Mode.Implicit, [...dummy_cycle, ...dummy_sp_cycle, ...pull, fl_ZN, to_a]),
-  0x28: Inst('PLP', Mode.Implicit, [...dummy_cycle, ...dummy_sp_cycle, ...pull, tr_v_p]),
+  0x68: Inst('PLA', Mode.Implicit, [...pre_pull, ...pull, fl_ZN, to_a]),
+  0x28: Inst('PLP', Mode.Implicit, [...pre_pull, ...pull, tr_v_p]),
 
   0x38: Inst('SEC', Mode.Implicit, [buildSetFlag(flagC), ...dummy_cycle]),
   0xf8: Inst('SED', Mode.Implicit, [buildSetFlag(flagD), ...dummy_cycle]),
