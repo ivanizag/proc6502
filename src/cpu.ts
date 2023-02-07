@@ -195,10 +195,10 @@ const from_pc_hi: CpuAction = s => {
   s.v = s.pc >> 8;
 };
 
-const tr_p_v: CpuAction = s => {
+const from_p: CpuAction = s => {
   s.v = s.p | (flag5 + flagB);
 };
-const tr_v_p: CpuAction = s => {
+const to_p: CpuAction = s => {
   s.p = (s.v | flag5) & ~flagB;
 };
 
@@ -267,16 +267,23 @@ const tr_pull_w: CpuAction = s => {
   s.w = 0x100 + s.sp;
 };
 
-const buildSetFlag = (flag: number) => {
+const buildSet = (flag: number) => {
   const op: CpuAction = s => {
     setFlag(s, flag);
   };
   return op;
 };
 
-const buildClearFlag = (flag: number) => {
+const buildClear = (flag: number) => {
   const op: CpuAction = s => {
     clearFlag(s, flag);
+  };
+  return op;
+};
+
+const set_w = (address: number) => {
+  const op: CpuAction = s => {
+    s.w = address;
   };
   return op;
 };
@@ -293,16 +300,16 @@ const dummy_sp_cycle = [tr_sp_w, ...read];
 const push = [tr_push_w, write];
 const pull = [tr_pull_w, ...read];
 const pre_pull = [...dummy_cycle, ...dummy_sp_cycle];
-const push_pc = [...dummy_sp_cycle, from_pc_hi, ...push, from_pc_lo, ...push];
-const pull_pc = [/*...dummy_sp_cycle,*/ ...pull, to_pc_lo, ...pull, to_pc_hi, /*...dummy_cycle*/];
+const push_pc = [from_pc_hi, ...push, from_pc_lo, ...push];
+const pull_pc = [...pull, to_pc_lo, ...pull, to_pc_hi];
 
 const load_v2_hi = [...read, tr_v_v2];
 const load_v2_lo = [...read, tr_v_v2hi, tr_v2_w];
+const load_w = [...load_v2_hi, inc_w, ...load_v2_lo];
 const load_w_no_cross_page = [...load_v2_hi, inc_w_no_cross_page, ...load_v2_lo];
 const load_w_page_zero = [...load_v2_hi, inc_w, page_zero, ...load_v2_lo];
-
 const param_zp_to_w = [tr_pc_w_inc, ...read, tr_v_w];
-const param_to_w = [tr_pc_w_inc, ...load_v2_hi, tr_pc_w_inc, ...load_v2_lo];
+const param_to_w = [tr_pc_w_inc, inc_pc, ...load_w];
 
 const mode_immediate = [tr_pc_w_inc];
 const mode_zeropage = [...param_zp_to_w];
@@ -316,14 +323,7 @@ const mode_absoluteYSlow = [...param_to_w, from_y, add_v_w, no_carry_optimizatio
 const mode_indirect = [...param_to_w, ...load_w_no_cross_page];
 const mode_indexed_indirectX = [...param_zp_to_w, ...read, from_x, add_v_w_lo, ...load_w_page_zero];
 const mode_indirect_indexedY = [...param_zp_to_w, ...load_w_page_zero, from_y, add_v_w, add_w_carry];
-const mode_indirect_indexedYSlow = [
-  ...param_zp_to_w,
-  ...load_w_page_zero,
-  from_y,
-  add_v_w,
-  no_carry_optimization,
-  add_w_carry,
-];
+const mode_indirect_indexedYSlow = [...param_zp_to_w, ...load_w_page_zero, from_y, add_v_w, no_carry_optimization, add_w_carry];
 
 function Inst(name: string, mode: Mode, steps: CpuAction[]): Instruction {
   return {name, mode, steps};
@@ -373,22 +373,23 @@ export const instructions: {[id: number]: Instruction} = {
   0x9a: Inst('TXS', Mode.Implicit, [from_x, to_sp, ...dummy_cycle]),
   0xba: Inst('TSX', Mode.Implicit, [from_sp, fl_ZN, to_x, ...dummy_cycle]),
 
+  0x00: Inst('BRK', Mode.Implicit, [...dummy_cycle, inc_pc, ...push_pc, from_p, ...push, set_w(0xfffe), ...load_w, tr_w_pc, buildSet(flagI)]),
   0x4c: Inst('JMP', Mode.Absolute, [...mode_absolute, tr_w_pc]),
   0x6c: Inst('JMP', Mode.Indirect, [...mode_indirect, tr_w_pc]),
-  0x20: Inst('JSR', Mode.Absolute, [tr_pc_w_inc, ...load_v2_hi, ...push_pc, tr_pc_w_inc, ...load_v2_lo, tr_w_pc]),
-  0x40: Inst('RTI', Mode.Implicit, [...pre_pull, ...pull, tr_v_p, ...pull_pc]),
+  0x20: Inst('JSR', Mode.Absolute, [tr_pc_w_inc, ...load_v2_hi, ...dummy_sp_cycle, ...push_pc, tr_pc_w_inc, ...load_v2_lo, tr_w_pc]),
+  0x40: Inst('RTI', Mode.Implicit, [...pre_pull, ...pull, to_p, ...pull_pc]),
   0x60: Inst('RTS', Mode.Implicit, [...pre_pull, ...pull_pc, ...dummy_cycle, inc_pc]),
 
   0x48: Inst('PHA', Mode.Implicit, [...dummy_cycle, from_a, ...push]),
-  0x08: Inst('PHP', Mode.Implicit, [...dummy_cycle, tr_p_v, ...push]),
+  0x08: Inst('PHP', Mode.Implicit, [...dummy_cycle, from_p, ...push]),
   0x68: Inst('PLA', Mode.Implicit, [...pre_pull, ...pull, fl_ZN, to_a]),
-  0x28: Inst('PLP', Mode.Implicit, [...pre_pull, ...pull, tr_v_p]),
+  0x28: Inst('PLP', Mode.Implicit, [...pre_pull, ...pull, to_p]),
 
-  0x38: Inst('SEC', Mode.Implicit, [buildSetFlag(flagC), ...dummy_cycle]),
-  0xf8: Inst('SED', Mode.Implicit, [buildSetFlag(flagD), ...dummy_cycle]),
-  0x78: Inst('SEI', Mode.Implicit, [buildSetFlag(flagI), ...dummy_cycle]),
-  0x18: Inst('CLC', Mode.Implicit, [buildClearFlag(flagC), ...dummy_cycle]),
-  0xd8: Inst('CLD', Mode.Implicit, [buildClearFlag(flagD), ...dummy_cycle]),
-  0x58: Inst('CLI', Mode.Implicit, [buildClearFlag(flagI), ...dummy_cycle]),
-  0xb8: Inst('CLV', Mode.Implicit, [buildClearFlag(flagV), ...dummy_cycle]),
+  0x38: Inst('SEC', Mode.Implicit, [buildSet(flagC), ...dummy_cycle]),
+  0xf8: Inst('SED', Mode.Implicit, [buildSet(flagD), ...dummy_cycle]),
+  0x78: Inst('SEI', Mode.Implicit, [buildSet(flagI), ...dummy_cycle]),
+  0x18: Inst('CLC', Mode.Implicit, [buildClear(flagC), ...dummy_cycle]),
+  0xd8: Inst('CLD', Mode.Implicit, [buildClear(flagD), ...dummy_cycle]),
+  0x58: Inst('CLI', Mode.Implicit, [buildClear(flagI), ...dummy_cycle]),
+  0xb8: Inst('CLV', Mode.Implicit, [buildClear(flagV), ...dummy_cycle]),
 };

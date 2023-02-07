@@ -28,12 +28,12 @@ function loadTestData(opcode: string): Scenario[] {
   return JSON.parse(content) as Scenario[];
 }
 
-//const single: number | undefined = 0x60;
-const single: number | undefined = undefined;
+const an_opcode = -1;
+const single = an_opcode !== -1;
 
 describe('Harte suite for 6502', () => {
   for (let opcode = 0; opcode < 256; opcode++) {
-    if ((opcode in instructions && !single) || opcode === single) {
+    if ((opcode in instructions && !single) || opcode === an_opcode) {
       const opcodeText = opcode.toString(16).toLowerCase().padStart(2, '0');
       describe(`Test 0x${opcodeText}`, () => {
         const scenarios = loadTestData(opcodeText);
