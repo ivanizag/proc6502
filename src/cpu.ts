@@ -141,6 +141,12 @@ const inc_w: CpuAction = s => {
 const inc_w_no_cross_page: CpuAction = s => {
   s.w = (s.w & 0xff00) + ((s.w + 1) & 0xff);
 };
+const inc_v: CpuAction = s => {
+  s.v = (s.v + 1) & 0xff;
+};
+const dec_v: CpuAction = s => {
+  s.v = (s.v - 1 + 256) & 0xff;
+};
 const page_zero: CpuAction = s => {
   s.w = s.w & 0xff;
 };
@@ -356,10 +362,10 @@ const mode_zeropage = [...param_zp_to_w];
 const mode_zeropageX = [...param_zp_to_w, ...read, from_x, add_v_w_lo];
 const mode_zeropageY = [...param_zp_to_w, ...read, from_y, add_v_w_lo];
 const mode_absolute = [...param_to_w];
-const mode_absoluteX = [...param_to_w, from_x, add_v_w, add_w_carry];
-const mode_absoluteY = [...param_to_w, from_y, add_v_w, add_w_carry];
-const mode_absoluteXSlow = [...param_to_w, from_x, add_v_w, no_carry_optimization, add_w_carry];
-const mode_absoluteYSlow = [...param_to_w, from_y, add_v_w, no_carry_optimization, add_w_carry];
+const mode_absoluteXFast = [...param_to_w, from_x, add_v_w, add_w_carry];
+const mode_absoluteYFast = [...param_to_w, from_y, add_v_w, add_w_carry];
+const mode_absoluteX = [...param_to_w, from_x, add_v_w, no_carry_optimization, add_w_carry];
+const mode_absoluteY = [...param_to_w, from_y, add_v_w, no_carry_optimization, add_w_carry];
 const mode_indirect = [...param_to_w, ...load_w_no_cross_page];
 const mode_indexed_indirectX = [...param_zp_to_w, ...read, from_x, add_v_w_lo, ...load_w_page_zero];
 const mode_indirect_indexedY = [...param_zp_to_w, ...load_w_page_zero, from_y, add_v_w, add_w_carry];
@@ -377,11 +383,11 @@ export const instructions: {[id: number]: Instruction} = {
   0xa5: Inst('LDA', Mode.ZeroPage, [...mode_zeropage, ...read, fl_ZN, to_a]),
   0xb5: Inst('LDA', Mode.ZeroPageX, [...mode_zeropageX, ...read, fl_ZN, to_a]),
   0xad: Inst('LDA', Mode.Absolute, [...mode_absolute, ...read, fl_ZN, to_a]),
-  0xbd: Inst('LDA', Mode.AbsoluteX, [...mode_absoluteX, ...read, fl_ZN, to_a]),
-  0xb9: Inst('LDA', Mode.AbsoluteY, [...mode_absoluteY, ...read, fl_ZN, to_a]),
+  0xbd: Inst('LDA', Mode.AbsoluteX, [...mode_absoluteXFast, ...read, fl_ZN, to_a]),
+  0xb9: Inst('LDA', Mode.AbsoluteY, [...mode_absoluteYFast, ...read, fl_ZN, to_a]),
   0xa1: Inst('LDA', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...read, fl_ZN, to_a]),
   0xb1: Inst('LDA', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...read, fl_ZN, to_a]),
-  0xbe: Inst('LDX', Mode.AbsoluteY, [...mode_absoluteY, ...read, fl_ZN, to_x]),
+  0xbe: Inst('LDX', Mode.AbsoluteY, [...mode_absoluteYFast, ...read, fl_ZN, to_x]),
   0xa2: Inst('LDX', Mode.Immediate, [...mode_immediate, ...read, fl_ZN, to_x]),
   0xa6: Inst('LDX', Mode.ZeroPage, [...mode_zeropage, ...read, fl_ZN, to_x]),
   0xb6: Inst('LDX', Mode.ZeroPageY, [...mode_zeropageY, ...read, fl_ZN, to_x]),
@@ -390,13 +396,13 @@ export const instructions: {[id: number]: Instruction} = {
   0xa4: Inst('LDY', Mode.ZeroPage, [...mode_zeropage, ...read, fl_ZN, to_y]),
   0xb4: Inst('LDY', Mode.ZeroPageX, [...mode_zeropageX, ...read, fl_ZN, to_y]),
   0xac: Inst('LDY', Mode.Absolute, [...mode_absolute, ...read, fl_ZN, to_y]),
-  0xbc: Inst('LDY', Mode.AbsoluteX, [...mode_absoluteX, ...read, fl_ZN, to_y]),
+  0xbc: Inst('LDY', Mode.AbsoluteX, [...mode_absoluteXFast, ...read, fl_ZN, to_y]),
 
   0x85: Inst('STA', Mode.ZeroPage, [...mode_zeropage, from_a, write]),
   0x95: Inst('STA', Mode.ZeroPageX, [...mode_zeropageX, from_a, write]),
   0x8d: Inst('STA', Mode.Absolute, [...mode_absolute, from_a, write]),
-  0x9d: Inst('STA', Mode.AbsoluteX, [...mode_absoluteXSlow, from_a, write]),
-  0x99: Inst('STA', Mode.AbsoluteY, [...mode_absoluteYSlow, from_a, write]),
+  0x9d: Inst('STA', Mode.AbsoluteX, [...mode_absoluteX, from_a, write]),
+  0x99: Inst('STA', Mode.AbsoluteY, [...mode_absoluteY, from_a, write]),
   0x81: Inst('STA', Mode.IndexedIndirectX, [...mode_indexed_indirectX, from_a, write]),
   0x91: Inst('STA', Mode.IndirectIndexedY, [...mode_indirect_indexedYSlow, from_a, write]),
   0x86: Inst('STX', Mode.ZeroPage, [...mode_zeropage, from_x, write]),
@@ -441,4 +447,18 @@ export const instructions: {[id: number]: Instruction} = {
   0x30: Inst('BMI', Mode.Relative, [...mode_relative, ...buildBranch(flagN, true)]),
   0x50: Inst('BVC', Mode.Relative, [...mode_relative, ...buildBranch(flagV, false)]),
   0x70: Inst('BVS', Mode.Relative, [...mode_relative, ...buildBranch(flagV, true)]),
+
+  0xe6: Inst('INC', Mode.ZeroPage, [...mode_zeropage, ...read, write, inc_v, fl_ZN, write]),
+  0xf6: Inst('INC', Mode.ZeroPageX, [...mode_zeropageX, ...read, write, inc_v, fl_ZN, write]),
+  0xee: Inst('INC', Mode.Absolute, [...mode_absolute, ...read, write, inc_v, fl_ZN, write]),
+  0xfe: Inst('INC', Mode.AbsoluteX, [...mode_absoluteX, ...read, write, inc_v, fl_ZN, write]),
+  0xc6: Inst('DEC', Mode.ZeroPage, [...mode_zeropage, ...read, write, dec_v, fl_ZN, write]),
+  0xd6: Inst('DEC', Mode.ZeroPageX, [...mode_zeropageX, ...read, write, dec_v, fl_ZN, write]),
+  0xce: Inst('DEC', Mode.Absolute, [...mode_absolute, ...read, write, dec_v, fl_ZN, write]),
+  0xde: Inst('DEC', Mode.AbsoluteX, [...mode_absoluteX, ...read, write, dec_v, fl_ZN, write]),
+
+  0xe8: Inst('INX', Mode.Implicit, [...mode_implicit, from_x, inc_v, fl_ZN, to_x]),
+  0xc8: Inst('INY', Mode.Implicit, [...mode_implicit, from_y, inc_v, fl_ZN, to_y]),
+  0xca: Inst('DEX', Mode.Implicit, [...mode_implicit, from_x, dec_v, fl_ZN, to_x]),
+  0x88: Inst('DEY', Mode.Implicit, [...mode_implicit, from_y, dec_v, fl_ZN, to_y]),
 };
