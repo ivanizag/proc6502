@@ -325,11 +325,47 @@ const buildBranch = (flag: number, test: boolean) => {
   return [op, br_in_page, br_page];
 };
 
+const buildALU = (op: CpuAction) => {
+  return [...read, write, op, fl_ZN, write];
+};
+
 const set_w = (address: number) => {
   const op: CpuAction = s => {
     s.w = address;
   };
   return op;
+};
+
+// Bit manipulation
+
+const op_rol: CpuAction = s => {
+  s.v = s.v << 1;
+  if (getFlag(s, flagC)) {
+    s.v++;
+  }
+  updateFlag(s, flagC, s.v > 0xff);
+  s.v = s.v & 0xff;
+};
+
+const op_ror: CpuAction = s => {
+  const willCarry = (s.v & 1) !== 0;
+  s.v = s.v >> 1;
+  if (getFlag(s, flagC)) {
+    s.v |= 0x80;
+  }
+  updateFlag(s, flagC, willCarry);
+};
+
+const op_asl: CpuAction = s => {
+  s.v = s.v << 1;
+  updateFlag(s, flagC, s.v > 0xff);
+  s.v = s.v & 0xff;
+};
+
+const op_lsr: CpuAction = s => {
+  const willCarry = (s.v & 1) !== 0;
+  s.v = s.v >> 1;
+  updateFlag(s, flagC, willCarry);
 };
 
 // Flags
@@ -448,17 +484,38 @@ export const instructions: {[id: number]: Instruction} = {
   0x50: Inst('BVC', Mode.Relative, [...mode_relative, ...buildBranch(flagV, false)]),
   0x70: Inst('BVS', Mode.Relative, [...mode_relative, ...buildBranch(flagV, true)]),
 
-  0xe6: Inst('INC', Mode.ZeroPage, [...mode_zeropage, ...read, write, inc_v, fl_ZN, write]),
-  0xf6: Inst('INC', Mode.ZeroPageX, [...mode_zeropageX, ...read, write, inc_v, fl_ZN, write]),
-  0xee: Inst('INC', Mode.Absolute, [...mode_absolute, ...read, write, inc_v, fl_ZN, write]),
-  0xfe: Inst('INC', Mode.AbsoluteX, [...mode_absoluteX, ...read, write, inc_v, fl_ZN, write]),
-  0xc6: Inst('DEC', Mode.ZeroPage, [...mode_zeropage, ...read, write, dec_v, fl_ZN, write]),
-  0xd6: Inst('DEC', Mode.ZeroPageX, [...mode_zeropageX, ...read, write, dec_v, fl_ZN, write]),
-  0xce: Inst('DEC', Mode.Absolute, [...mode_absolute, ...read, write, dec_v, fl_ZN, write]),
-  0xde: Inst('DEC', Mode.AbsoluteX, [...mode_absoluteX, ...read, write, dec_v, fl_ZN, write]),
+  0xe6: Inst('INC', Mode.ZeroPage, [...mode_zeropage, ...buildALU(inc_v)]),
+  0xf6: Inst('INC', Mode.ZeroPageX, [...mode_zeropageX, ...buildALU(inc_v)]),
+  0xee: Inst('INC', Mode.Absolute, [...mode_absolute, ...buildALU(inc_v)]),
+  0xfe: Inst('INC', Mode.AbsoluteX, [...mode_absoluteX, ...buildALU(inc_v)]),
+  0xc6: Inst('DEC', Mode.ZeroPage, [...mode_zeropage, ...buildALU(dec_v)]),
+  0xd6: Inst('DEC', Mode.ZeroPageX, [...mode_zeropageX, ...buildALU(dec_v)]),
+  0xce: Inst('DEC', Mode.Absolute, [...mode_absolute, ...buildALU(dec_v)]),
+  0xde: Inst('DEC', Mode.AbsoluteX, [...mode_absoluteX, ...buildALU(dec_v)]),
 
   0xe8: Inst('INX', Mode.Implicit, [...mode_implicit, from_x, inc_v, fl_ZN, to_x]),
   0xc8: Inst('INY', Mode.Implicit, [...mode_implicit, from_y, inc_v, fl_ZN, to_y]),
   0xca: Inst('DEX', Mode.Implicit, [...mode_implicit, from_x, dec_v, fl_ZN, to_x]),
   0x88: Inst('DEY', Mode.Implicit, [...mode_implicit, from_y, dec_v, fl_ZN, to_y]),
+
+  0x2a: Inst('ROL', Mode.Implicit, [...mode_implicit, from_a, op_rol, fl_ZN, to_a]),
+  0x26: Inst('ROL', Mode.ZeroPage, [...mode_zeropage, ...buildALU(op_rol)]),
+  0x36: Inst('ROL', Mode.ZeroPageX, [...mode_zeropageX, ...buildALU(op_rol)]),
+  0x2e: Inst('ROL', Mode.Absolute, [...mode_absolute, ...buildALU(op_rol)]),
+  0x3e: Inst('ROL', Mode.AbsoluteX, [...mode_absoluteX, ...buildALU(op_rol)]),
+  0x6a: Inst('ROR', Mode.Implicit, [...mode_implicit, from_a, op_ror, fl_ZN, to_a]),
+  0x66: Inst('ROR', Mode.ZeroPage, [...mode_zeropage, ...buildALU(op_ror)]),
+  0x76: Inst('ROR', Mode.ZeroPageX, [...mode_zeropageX, ...buildALU(op_ror)]),
+  0x6e: Inst('ROR', Mode.Absolute, [...mode_absolute, ...buildALU(op_ror)]),
+  0x7e: Inst('ROR', Mode.AbsoluteX, [...mode_absoluteX, ...buildALU(op_ror)]),
+  0x0a: Inst('ASL', Mode.Implicit, [...mode_implicit, from_a, op_asl, fl_ZN, to_a]),
+  0x06: Inst('ASL', Mode.ZeroPage, [...mode_zeropage, ...buildALU(op_asl)]),
+  0x16: Inst('ASL', Mode.ZeroPageX, [...mode_zeropageX, ...buildALU(op_asl)]),
+  0x0e: Inst('ASL', Mode.Absolute, [...mode_absolute, ...buildALU(op_asl)]),
+  0x1e: Inst('ASL', Mode.AbsoluteX, [...mode_absoluteX, ...buildALU(op_asl)]),
+  0x4a: Inst('LSR', Mode.Implicit, [...mode_implicit, from_a, op_lsr, fl_ZN, to_a]),
+  0x46: Inst('LSR', Mode.ZeroPage, [...mode_zeropage, ...buildALU(op_lsr)]),
+  0x56: Inst('LSR', Mode.ZeroPageX, [...mode_zeropageX, ...buildALU(op_lsr)]),
+  0x4e: Inst('LSR', Mode.Absolute, [...mode_absolute, ...buildALU(op_lsr)]),
+  0x5e: Inst('LSR', Mode.AbsoluteX, [...mode_absoluteX, ...buildALU(op_lsr)]),
 };
