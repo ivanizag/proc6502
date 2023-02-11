@@ -31,23 +31,23 @@ function loadTestData(opcode: string): Scenario[] {
 const an_opcode = -1;
 const single = an_opcode !== -1;
 
-describe('Harte suite for 6502', () => {
-  for (let opcode = 0; opcode < 256; opcode++) {
-    if ((opcode in instructions && !single) || opcode === an_opcode) {
-      const opcodeText = opcode.toString(16).toLowerCase().padStart(2, '0');
-      describe(`Test 0x${opcodeText}`, () => {
-        const scenarios = loadTestData(opcodeText);
-        scenarios.forEach((scenario, i) => {
-          if (i < 1000) {
-            test(scenario.name, () => {
-              runScenario(scenario);
-            });
-          }
-        });
+//describe('Harte suite for 6502', () => {
+for (let opcode = 0; opcode < 256; opcode++) {
+  if ((opcode in instructions && !single) || opcode === an_opcode) {
+    const opcodeText = opcode.toString(16).toLowerCase().padStart(2, '0');
+    describe(`Harte 6502 Test 0x${opcodeText}`, () => {
+      const scenarios = loadTestData(opcodeText);
+      scenarios.forEach((scenario, i) => {
+        if (i < 1000) {
+          test(scenario.name, () => {
+            runScenario(scenario);
+          });
+        }
       });
-    }
+    });
   }
-});
+}
+//});
 
 function runScenario(scenario: Scenario) {
   const state: CpuState = {

@@ -383,10 +383,27 @@ const op_eor: CpuAction = s => {
   s.v = s.v ^ s.a;
 };
 
-// Flags
 const fl_ZN: CpuAction = s => {
   updateFlag(s, flagZ, s.v === 0);
   updateFlag(s, flagN, s.v >= 1 << 7);
+};
+
+function cmp_inner(s: CpuState, ref: number) {
+  s.v = ref - s.v;
+  updateFlag(s, flagC, s.v >= 0);
+  s.v = s.v & 0xff;
+  updateFlag(s, flagZ, s.v === 0);
+  updateFlag(s, flagN, s.v >= 1 << 7);
+}
+
+const cmp_a: CpuAction = s => {
+  cmp_inner(s, s.a);
+};
+const cmp_x: CpuAction = s => {
+  cmp_inner(s, s.x);
+};
+const cmp_y: CpuAction = s => {
+  cmp_inner(s, s.y);
 };
 
 const dummy_cycle = [tr_pc_w, ...read];
@@ -542,7 +559,6 @@ export const instructions: {[id: number]: Instruction} = {
   0x19: Inst('ORA', Mode.AbsoluteY, [...mode_absoluteYFast, ...buildLogic(op_ora)]),
   0x01: Inst('ORA', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...buildLogic(op_ora)]),
   0x11: Inst('ORA', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...buildLogic(op_ora)]),
-
   0x29: Inst('AND', Mode.Immediate, [...mode_immediate, ...buildLogic(op_and)]),
   0x25: Inst('AND', Mode.ZeroPage, [...mode_zeropage, ...buildLogic(op_and)]),
   0x35: Inst('AND', Mode.ZeroPageX, [...mode_zeropageX, ...buildLogic(op_and)]),
@@ -551,7 +567,6 @@ export const instructions: {[id: number]: Instruction} = {
   0x39: Inst('AND', Mode.AbsoluteY, [...mode_absoluteYFast, ...buildLogic(op_and)]),
   0x21: Inst('AND', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...buildLogic(op_and)]),
   0x31: Inst('AND', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...buildLogic(op_and)]),
-
   0x49: Inst('EOR', Mode.Immediate, [...mode_immediate, ...buildLogic(op_eor)]),
   0x45: Inst('EOR', Mode.ZeroPage, [...mode_zeropage, ...buildLogic(op_eor)]),
   0x55: Inst('EOR', Mode.ZeroPageX, [...mode_zeropageX, ...buildLogic(op_eor)]),
@@ -560,4 +575,21 @@ export const instructions: {[id: number]: Instruction} = {
   0x59: Inst('EOR', Mode.AbsoluteY, [...mode_absoluteYFast, ...buildLogic(op_eor)]),
   0x41: Inst('EOR', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...buildLogic(op_eor)]),
   0x51: Inst('EOR', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...buildLogic(op_eor)]),
+
+  0xc9: Inst('CMP', Mode.Immediate, [...mode_immediate, ...read, cmp_a]),
+  0xc5: Inst('CMP', Mode.ZeroPage, [...mode_zeropage, ...read, cmp_a]),
+  0xd5: Inst('CMP', Mode.ZeroPageX, [...mode_zeropageX, ...read, cmp_a]),
+  0xcd: Inst('CMP', Mode.Absolute, [...mode_absolute, ...read, cmp_a]),
+  0xdd: Inst('CMP', Mode.AbsoluteX, [...mode_absoluteXFast, ...read, cmp_a]),
+  0xd9: Inst('CMP', Mode.AbsoluteY, [...mode_absoluteYFast, ...read, cmp_a]),
+  0xc1: Inst('CMP', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...read, cmp_a]),
+  0xd1: Inst('CMP', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...read, cmp_a]),
+  0xe0: Inst('CPX', Mode.Immediate, [...mode_immediate, ...read, cmp_x]),
+  0xe4: Inst('CPX', Mode.ZeroPage, [...mode_zeropage, ...read, cmp_x]),
+  0xec: Inst('CPX', Mode.Absolute, [...mode_absolute, ...read, cmp_x]),
+  0xc0: Inst('CPY', Mode.Immediate, [...mode_immediate, ...read, cmp_y]),
+  0xc4: Inst('CPY', Mode.ZeroPage, [...mode_zeropage, ...read, cmp_y]),
+  0xcc: Inst('CPY', Mode.Absolute, [...mode_absolute, ...read, cmp_y]),
+
+  // ADC, SBC, BIT
 };
