@@ -80,12 +80,16 @@ function runScenario(scenario: Scenario) {
     cycle(state, bus);
   }
 
-  // Check cycles
-  if (single /*&& scenario.name === "91 fc 44"*/) {
+  if (single) {
     console.log(scenario);
     console.log(receivedCycles);
     console.log(scenario.cycles);
   }
+
+  // Check correct cycle count
+  expect(state.steps.length).toBe(0);
+
+  // Check cycles
   expect(receivedCycles).toStrictEqual(scenario.cycles);
 
   // Check final state
@@ -101,7 +105,4 @@ function runScenario(scenario: Scenario) {
     const value = (ram.find(v => v[0] === pair[0]) || [0])[1];
     expect(value).toBe(pair[1]);
   });
-
-  // Check correct cycle count
-  expect(state.steps.length).toBe(0);
 }

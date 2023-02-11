@@ -329,6 +329,10 @@ const buildALU = (op: CpuAction) => {
   return [...read, write, op, fl_ZN, write];
 };
 
+const buildLogic = (op: CpuAction) => {
+  return [...read, op, fl_ZN, to_a];
+};
+
 const set_w = (address: number) => {
   const op: CpuAction = s => {
     s.w = address;
@@ -336,8 +340,7 @@ const set_w = (address: number) => {
   return op;
 };
 
-// Bit manipulation
-
+// Operations on v
 const op_rol: CpuAction = s => {
   s.v = s.v << 1;
   if (getFlag(s, flagC)) {
@@ -366,6 +369,18 @@ const op_lsr: CpuAction = s => {
   const willCarry = (s.v & 1) !== 0;
   s.v = s.v >> 1;
   updateFlag(s, flagC, willCarry);
+};
+
+const op_ora: CpuAction = s => {
+  s.v = s.v | s.a;
+};
+
+const op_and: CpuAction = s => {
+  s.v = s.v & s.a;
+};
+
+const op_eor: CpuAction = s => {
+  s.v = s.v ^ s.a;
 };
 
 // Flags
@@ -518,4 +533,31 @@ export const instructions: {[id: number]: Instruction} = {
   0x56: Inst('LSR', Mode.ZeroPageX, [...mode_zeropageX, ...buildALU(op_lsr)]),
   0x4e: Inst('LSR', Mode.Absolute, [...mode_absolute, ...buildALU(op_lsr)]),
   0x5e: Inst('LSR', Mode.AbsoluteX, [...mode_absoluteX, ...buildALU(op_lsr)]),
+
+  0x09: Inst('ORA', Mode.Immediate, [...mode_immediate, ...buildLogic(op_ora)]),
+  0x05: Inst('ORA', Mode.ZeroPage, [...mode_zeropage, ...buildLogic(op_ora)]),
+  0x15: Inst('ORA', Mode.ZeroPageX, [...mode_zeropageX, ...buildLogic(op_ora)]),
+  0x0d: Inst('ORA', Mode.Absolute, [...mode_absolute, ...buildLogic(op_ora)]),
+  0x1d: Inst('ORA', Mode.AbsoluteX, [...mode_absoluteXFast, ...buildLogic(op_ora)]),
+  0x19: Inst('ORA', Mode.AbsoluteY, [...mode_absoluteYFast, ...buildLogic(op_ora)]),
+  0x01: Inst('ORA', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...buildLogic(op_ora)]),
+  0x11: Inst('ORA', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...buildLogic(op_ora)]),
+
+  0x29: Inst('AND', Mode.Immediate, [...mode_immediate, ...buildLogic(op_and)]),
+  0x25: Inst('AND', Mode.ZeroPage, [...mode_zeropage, ...buildLogic(op_and)]),
+  0x35: Inst('AND', Mode.ZeroPageX, [...mode_zeropageX, ...buildLogic(op_and)]),
+  0x2d: Inst('AND', Mode.Absolute, [...mode_absolute, ...buildLogic(op_and)]),
+  0x3d: Inst('AND', Mode.AbsoluteX, [...mode_absoluteXFast, ...buildLogic(op_and)]),
+  0x39: Inst('AND', Mode.AbsoluteY, [...mode_absoluteYFast, ...buildLogic(op_and)]),
+  0x21: Inst('AND', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...buildLogic(op_and)]),
+  0x31: Inst('AND', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...buildLogic(op_and)]),
+
+  0x49: Inst('EOR', Mode.Immediate, [...mode_immediate, ...buildLogic(op_eor)]),
+  0x45: Inst('EOR', Mode.ZeroPage, [...mode_zeropage, ...buildLogic(op_eor)]),
+  0x55: Inst('EOR', Mode.ZeroPageX, [...mode_zeropageX, ...buildLogic(op_eor)]),
+  0x4d: Inst('EOR', Mode.Absolute, [...mode_absolute, ...buildLogic(op_eor)]),
+  0x5d: Inst('EOR', Mode.AbsoluteX, [...mode_absoluteXFast, ...buildLogic(op_eor)]),
+  0x59: Inst('EOR', Mode.AbsoluteY, [...mode_absoluteYFast, ...buildLogic(op_eor)]),
+  0x41: Inst('EOR', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...buildLogic(op_eor)]),
+  0x51: Inst('EOR', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...buildLogic(op_eor)]),
 };
