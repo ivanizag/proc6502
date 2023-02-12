@@ -385,7 +385,13 @@ const op_eor: CpuAction = s => {
 
 const fl_ZN: CpuAction = s => {
   updateFlag(s, flagZ, s.v === 0);
-  updateFlag(s, flagN, s.v >= 1 << 7);
+  updateFlag(s, flagN, (s.v & (1 << 7)) !== 0);
+};
+
+const fl_bit: CpuAction = s => {
+  updateFlag(s, flagZ, (s.v & s.a) === 0);
+  updateFlag(s, flagN, (s.v & (1 << 7)) !== 0);
+  updateFlag(s, flagV, (s.v & (1 << 6)) !== 0);
 };
 
 function cmp_inner(s: CpuState, ref: number) {
@@ -591,5 +597,8 @@ export const instructions: {[id: number]: Instruction} = {
   0xc4: Inst('CPY', Mode.ZeroPage, [...mode_zeropage, ...read, cmp_y]),
   0xcc: Inst('CPY', Mode.Absolute, [...mode_absolute, ...read, cmp_y]),
 
-  // ADC, SBC, BIT
+  0x24: Inst('BIT', Mode.ZeroPage, [...mode_zeropage, ...read, fl_bit]),
+  0x2c: Inst('BIT', Mode.Absolute, [...mode_absolute, ...read, fl_bit]),
+
+  // ADC, SBC
 };
