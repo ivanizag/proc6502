@@ -28,28 +28,27 @@ function loadTestData(opcode: string): Scenario[] {
   return JSON.parse(content) as Scenario[];
 }
 
-const an_opcode = -1;
-const single = an_opcode !== -1;
+export function runHarteSuiteRange(start: number, end: number) {
+  const an_opcode = -1;
+  const single = an_opcode !== -1;
 
-//describe('Harte suite for 6502', () => {
-for (let opcode = 0; opcode < 256; opcode++) {
-  if ((opcode in instructions && !single) || opcode === an_opcode) {
-    const opcodeText = opcode.toString(16).toLowerCase().padStart(2, '0');
-    describe(`Harte 6502 Test 0x${opcodeText}`, () => {
-      const scenarios = loadTestData(opcodeText);
-      scenarios.forEach((scenario, i) => {
-        if (i < 1000) {
-          test(scenario.name, () => {
-            runScenario(scenario);
-          });
-        }
+  for (let opcode = start; opcode < end; opcode++) {
+    if ((opcode in instructions && !single) || opcode === an_opcode) {
+      const opcodeText = opcode.toString(16).toLowerCase().padStart(2, '0');
+      describe(`Harte 6502 Test 0x${opcodeText}`, () => {
+        const scenarios: [string, Scenario][] = loadTestData(opcodeText)
+          .slice(0, 1000)
+          .map(s => [s.name, s]);
+
+        test.each(scenarios)('%s', (name, scenario: Scenario) => {
+          runScenario(scenario, single);
+        });
       });
-    });
+    }
   }
 }
-//});
 
-function runScenario(scenario: Scenario) {
+function runScenario(scenario: Scenario, log: boolean) {
   const state: CpuState = {
     ...newCpuState(),
     pc: scenario.initial.pc,
@@ -80,7 +79,7 @@ function runScenario(scenario: Scenario) {
     cycle(state, bus);
   }
 
-  if (single) {
+  if (log) {
     console.log(scenario);
     console.log(receivedCycles);
     console.log(scenario.cycles);

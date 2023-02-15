@@ -412,7 +412,7 @@ const op_adc: CpuAction = s => {
 
 const op_sbc: CpuAction = s => {
   const notCarry = getFlag(s, flagC) ? 0 : 1;
-  const result = s.a - s.v - notCarry;
+  const result = (s.a - s.v - notCarry) & 0xffff;
   if (getFlag(s, flagD)) {
     let lo = ((s.a & 0x0f) - (s.v & 0x0f) - notCarry) & 0xffff;
     if (lo > 0xf) {
@@ -424,7 +424,7 @@ const op_sbc: CpuAction = s => {
     }
     bcdResult = (bcdResult + (s.a & 0xf0) - (s.v & 0xf0)) & 0xffff;
 
-    updateFlag(s, flagV, ((result ^ s.a) & (result ^ s.v) & 0x80) !== 0);
+    updateFlag(s, flagV, ((result ^ s.a) & (~result ^ s.v) & 0x80) !== 0);
     updateFlag(s, flagN, (bcdResult & (1 << 7)) !== 0);
 
     if (bcdResult > 0xff) {
@@ -433,11 +433,10 @@ const op_sbc: CpuAction = s => {
     updateFlag(s, flagC, bcdResult <= 0xff);
     s.v = bcdResult & 0xff;
     updateFlag(s, flagZ, (result & 0xff) === 0);
-
-    s.y = s.y + 1;
   } else {
-    updateFlag(s, flagC, result > 0xff);
-    updateFlag(s, flagV, ((result ^ s.a) & (result ^ s.v) & 0x80) !== 0);
+    console.log(result & 0xffff);
+    updateFlag(s, flagC, result <= 0xff);
+    updateFlag(s, flagV, ((result ^ s.a) & (~result ^ s.v) & 0x80) !== 0);
     s.v = result & 0xff;
     updateFlag(s, flagZ, s.v === 0);
     updateFlag(s, flagN, (s.v & (1 << 7)) !== 0);
@@ -670,14 +669,12 @@ export const instructions: {[id: number]: Instruction} = {
   0x61: Inst('ADC', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...read, op_adc, to_a]),
   0x71: Inst('ADC', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...read, op_adc, to_a]),
 
-  /*
   0xe9: Inst('SBC', Mode.Immediate, [...mode_immediate, ...read, op_sbc, to_a]),
-	0xe5: Inst('SBC', Mode.ZeroPage, [...mode_zeropage, ...read, op_sbc, to_a]),
-	0xf5: Inst('SBC', Mode.ZeroPageX, [...mode_zeropageX, ...read, op_sbc, to_a]),
-	0xeD: Inst('SBC', Mode.Absolute, [...mode_absolute, ...read, op_sbc, to_a]),
-	0xfD: Inst('SBC', Mode.AbsoluteX, [...mode_absoluteXFast, ...read, op_sbc, to_a]),
-	0xf9: Inst('SBC', Mode.AbsoluteY, [...mode_absoluteYFast, ...read, op_sbc, to_a]),
-	0xe1: Inst('SBC', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...read, op_sbc, to_a]),
-	0xf1: Inst('SBC', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...read, op_sbc, to_a]),
-  */
+  0xe5: Inst('SBC', Mode.ZeroPage, [...mode_zeropage, ...read, op_sbc, to_a]),
+  0xf5: Inst('SBC', Mode.ZeroPageX, [...mode_zeropageX, ...read, op_sbc, to_a]),
+  0xed: Inst('SBC', Mode.Absolute, [...mode_absolute, ...read, op_sbc, to_a]),
+  0xfd: Inst('SBC', Mode.AbsoluteX, [...mode_absoluteXFast, ...read, op_sbc, to_a]),
+  0xf9: Inst('SBC', Mode.AbsoluteY, [...mode_absoluteYFast, ...read, op_sbc, to_a]),
+  0xe1: Inst('SBC', Mode.IndexedIndirectX, [...mode_indexed_indirectX, ...read, op_sbc, to_a]),
+  0xf1: Inst('SBC', Mode.IndirectIndexedY, [...mode_indirect_indexedY, ...read, op_sbc, to_a]),
 };
