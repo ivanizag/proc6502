@@ -1,28 +1,28 @@
-import {cycle, newCpuState} from '../src/cpu';
+import {Proc6502} from '../src/cpu';
 import {newBus} from '../src/bus';
 
 test('PC increases by 1', () => {
-  const state = newCpuState();
+  const proc = new Proc6502();
   const bus = newBus();
 
   bus.data = 0xea; // NOP
-  cycle(state, bus);
+  proc.cycle(bus);
   expect(bus.address).toBe(0x0001);
 
-  cycle(state, bus);
+  proc.cycle(bus);
   expect(bus.address).toBe(0x0001);
 });
 
 test('0xa0 LDY', () => {
-  const state = newCpuState();
+  const proc = new Proc6502();
   const bus = newBus();
 
   bus.data = 0xa0; // LDY
-  cycle(state, bus);
+  proc.cycle(bus);
   expect(bus.address).toBe(0x0001);
 
   bus.data = 0x34;
-  cycle(state, bus);
+  proc.cycle(bus);
   expect(bus.address).toBe(0x0002);
-  expect(state.y).toBe(0x34);
+  expect(proc.y).toBe(0x34);
 });

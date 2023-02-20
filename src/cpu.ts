@@ -1,6 +1,7 @@
 import {Bus} from './bus';
 
-export interface CpuState {
+export class Proc6502 {
+  // Registers
   pc: number;
   sp: number;
   a: number;
@@ -8,17 +9,84 @@ export interface CpuState {
   y: number;
   p: number;
 
+  // Internal registers
   v: number;
   v2: number;
   w: number;
   w_carry: boolean;
   pc_target: undefined | number;
 
+  // Execution flow
   opcode: number;
   steps: CpuAction[];
   step: number;
   yield: boolean;
   trace: boolean;
+
+  constructor() {
+    this.pc = 0;
+    this.sp = 0;
+    this.a = 0;
+    this.x = 0;
+    this.y = 0;
+    this.p = 0;
+    this.v = 0;
+    this.v2 = 0;
+    this.w = 0;
+    this.w_carry = false;
+    this.pc_target = undefined;
+    this.opcode = 0;
+    this.steps = [];
+    this.step = 0;
+    this.yield = false;
+    this.trace = false;
+  }
+
+  cycle(bus: Bus) {
+    if (!this.steps.length) {
+      opDecode(this, bus);
+      if (this.trace) console.log('Decoded', this, bus);
+    }
+
+    while (!this.yield && this.step < this.steps.length) {
+      this.steps[this.step](this, bus);
+      this.step++;
+      if (this.trace) console.log('Step', this, bus);
+    }
+
+    if (!this.yield) {
+      this.steps = [];
+      tr_pc_w(this, bus);
+      yield_read(this, bus);
+      if (this.trace) console.log('Next operation', this, bus);
+    }
+
+    this.yield = false;
+  }
+
+  midInstruction(): boolean {
+    return this.steps.length != 0;
+  }
+  
+  getFlag(flag: number): boolean {
+    return (this.p & flag) !== 0;
+  }
+
+  setFlag(flag: number) {
+    this.p |= flag;
+  }
+
+  clearFlag(flag: number) {
+    this.p &= ~flag;
+  }
+
+  updateFlag(flag: number, value: boolean) {
+    if (value) {
+      this.setFlag(flag);
+    } else {
+      this.clearFlag(flag);
+    }
+  }
 }
 
 const flagN = 1 << 7;
@@ -30,45 +98,10 @@ const flagI = 1 << 2;
 const flagZ = 1 << 1;
 const flagC = 1 << 0;
 
-function getFlag(s: CpuState, flag: number): boolean {
-  return (s.p & flag) !== 0;
-}
-
-function setFlag(s: CpuState, flag: number) {
-  s.p |= flag;
-}
-
-function clearFlag(s: CpuState, flag: number) {
-  s.p &= ~flag;
-}
-
-function updateFlag(s: CpuState, flag: number, value: boolean) {
-  if (value) {
-    setFlag(s, flag);
-  } else {
-    clearFlag(s, flag);
-  }
-}
-
-export function newCpuState(): CpuState {
-  return {
-    pc: 0,
-    sp: 0,
-    a: 0,
-    x: 0,
-    y: 0,
-    p: 0,
-    v: 0,
-    v2: 0,
-    w: 0,
-    w_carry: false,
-    pc_target: undefined,
-    opcode: 0,
-    steps: [],
-    step: 0,
-    yield: false,
-    trace: false,
-  };
+interface Instruction {
+  name: string;
+  mode: Mode;
+  steps: CpuAction[];
 }
 
 enum Mode {
@@ -86,39 +119,7 @@ enum Mode {
   Relative,
 }
 
-interface Instruction {
-  name: string;
-  mode: Mode;
-  steps: CpuAction[];
-}
-
-const incWord = (v: number) => (v + 1) & 0xffff;
-
-export type CpuAction = (state: CpuState, bus: Bus) => void;
-
-export function cycle(state: CpuState, bus: Bus) {
-  if (!state.steps.length) {
-    opDecode(state, bus);
-    if (state.trace) console.log('Decoded', state, bus);
-  }
-
-  while (!state.yield && state.step < state.steps.length) {
-    state.steps[state.step](state, bus);
-    state.step++;
-    if (state.trace) console.log('Step', state, bus);
-  }
-
-  if (!state.yield) {
-    state.steps = [];
-    tr_pc_w(state, bus);
-    yield_read(state, bus);
-    if (state.trace) console.log('Next operation', state, bus);
-  }
-
-  state.yield = false;
-
-  if (state.trace) console.log('yield');
-}
+type CpuAction = (state: Proc6502, bus: Bus) => void;
 
 const opDecode: CpuAction = (s, b) => {
   s.opcode = b.data;
@@ -131,6 +132,8 @@ const opDecode: CpuAction = (s, b) => {
   s.w_carry = false;
   s.pc = incWord(s.pc);
 };
+
+const incWord = (v: number) => (v + 1) & 0xffff;
 
 const inc_pc: CpuAction = s => {
   s.pc = incWord(s.pc);
@@ -282,21 +285,21 @@ const tr_pull_w: CpuAction = s => {
 
 const buildSet = (flag: number) => {
   const op: CpuAction = s => {
-    setFlag(s, flag);
+    s.setFlag(flag);
   };
   return op;
 };
 
 const buildClear = (flag: number) => {
   const op: CpuAction = s => {
-    clearFlag(s, flag);
+    s.clearFlag(flag);
   };
   return op;
 };
 
 const buildBranch = (flag: number, test: boolean) => {
   const op: CpuAction = (s, b) => {
-    if (getFlag(s, flag) === test) {
+    if (s.getFlag(flag) === test) {
       const offset = s.v > 127 ? s.v - 256 : s.v;
       s.pc_target = (s.pc + offset) & 0xffff;
       s.w = s.pc;
@@ -343,32 +346,32 @@ const set_w = (address: number) => {
 // Operations on v
 const op_rol: CpuAction = s => {
   s.v = s.v << 1;
-  if (getFlag(s, flagC)) {
+  if (s.getFlag(flagC)) {
     s.v++;
   }
-  updateFlag(s, flagC, s.v > 0xff);
+  s.updateFlag(flagC, s.v > 0xff);
   s.v = s.v & 0xff;
 };
 
 const op_ror: CpuAction = s => {
   const willCarry = (s.v & 1) !== 0;
   s.v = s.v >> 1;
-  if (getFlag(s, flagC)) {
+  if (s.getFlag(flagC)) {
     s.v |= 0x80;
   }
-  updateFlag(s, flagC, willCarry);
+  s.updateFlag(flagC, willCarry);
 };
 
 const op_asl: CpuAction = s => {
   s.v = s.v << 1;
-  updateFlag(s, flagC, s.v > 0xff);
+  s.updateFlag(flagC, s.v > 0xff);
   s.v = s.v & 0xff;
 };
 
 const op_lsr: CpuAction = s => {
   const willCarry = (s.v & 1) !== 0;
   s.v = s.v >> 1;
-  updateFlag(s, flagC, willCarry);
+  s.updateFlag(flagC, willCarry);
 };
 
 const op_ora: CpuAction = s => {
@@ -384,36 +387,36 @@ const op_eor: CpuAction = s => {
 };
 
 const op_adc: CpuAction = s => {
-  const carry = getFlag(s, flagC) ? 1 : 0;
+  const carry = s.getFlag(flagC) ? 1 : 0;
   const result = s.a + s.v + carry;
-  if (getFlag(s, flagD)) {
+  if (s.getFlag(flagD)) {
     let lo = (s.a & 0x0f) + (s.v & 0x0f) + carry;
     if (lo >= 0xa) {
       lo = ((lo + 0x6) & 0x0f) + 0x10;
     }
     let bcdResult = (s.a & 0xf0) + (s.v & 0xf0) + lo;
-    updateFlag(s, flagV, ((bcdResult ^ s.a) & (bcdResult ^ s.v) & 0x80) !== 0);
-    updateFlag(s, flagN, (bcdResult & (1 << 7)) !== 0);
+    s.updateFlag(flagV, ((bcdResult ^ s.a) & (bcdResult ^ s.v) & 0x80) !== 0);
+    s.updateFlag(flagN, (bcdResult & (1 << 7)) !== 0);
 
     if (bcdResult >= 0xa0) {
       bcdResult += 0x60;
     }
-    updateFlag(s, flagC, bcdResult > 0xff);
+    s.updateFlag(flagC, bcdResult > 0xff);
     s.v = bcdResult & 0xff;
-    updateFlag(s, flagZ, (result & 0xff) === 0);
+    s.updateFlag(flagZ, (result & 0xff) === 0);
   } else {
-    updateFlag(s, flagC, result > 0xff);
-    updateFlag(s, flagV, ((result ^ s.a) & (result ^ s.v) & 0x80) !== 0);
+    s.updateFlag(flagC, result > 0xff);
+    s.updateFlag(flagV, ((result ^ s.a) & (result ^ s.v) & 0x80) !== 0);
     s.v = result & 0xff;
-    updateFlag(s, flagZ, s.v === 0);
-    updateFlag(s, flagN, (s.v & (1 << 7)) !== 0);
+    s.updateFlag(flagZ, s.v === 0);
+    s.updateFlag(flagN, (s.v & (1 << 7)) !== 0);
   }
 };
 
 const op_sbc: CpuAction = s => {
-  const notCarry = getFlag(s, flagC) ? 0 : 1;
+  const notCarry = s.getFlag(flagC) ? 0 : 1;
   const result = (s.a - s.v - notCarry) & 0xffff;
-  if (getFlag(s, flagD)) {
+  if (s.getFlag(flagD)) {
     let lo = ((s.a & 0x0f) - (s.v & 0x0f) - notCarry) & 0xffff;
     if (lo > 0xf) {
       lo = (lo - 0x6) & 0xffff;
@@ -424,42 +427,41 @@ const op_sbc: CpuAction = s => {
     }
     bcdResult = (bcdResult + (s.a & 0xf0) - (s.v & 0xf0)) & 0xffff;
 
-    updateFlag(s, flagV, ((result ^ s.a) & (~result ^ s.v) & 0x80) !== 0);
-    updateFlag(s, flagN, (bcdResult & (1 << 7)) !== 0);
+    s.updateFlag(flagV, ((result ^ s.a) & (~result ^ s.v) & 0x80) !== 0);
+    s.updateFlag(flagN, (bcdResult & (1 << 7)) !== 0);
 
     if (bcdResult > 0xff) {
       bcdResult -= 0x60;
     }
-    updateFlag(s, flagC, bcdResult <= 0xff);
+    s.updateFlag(flagC, bcdResult <= 0xff);
     s.v = bcdResult & 0xff;
-    updateFlag(s, flagZ, (result & 0xff) === 0);
+    s.updateFlag(flagZ, (result & 0xff) === 0);
   } else {
-    console.log(result & 0xffff);
-    updateFlag(s, flagC, result <= 0xff);
-    updateFlag(s, flagV, ((result ^ s.a) & (~result ^ s.v) & 0x80) !== 0);
+    s.updateFlag(flagC, result <= 0xff);
+    s.updateFlag(flagV, ((result ^ s.a) & (~result ^ s.v) & 0x80) !== 0);
     s.v = result & 0xff;
-    updateFlag(s, flagZ, s.v === 0);
-    updateFlag(s, flagN, (s.v & (1 << 7)) !== 0);
+    s.updateFlag(flagZ, s.v === 0);
+    s.updateFlag(flagN, (s.v & (1 << 7)) !== 0);
   }
 };
 
 const fl_ZN: CpuAction = s => {
-  updateFlag(s, flagZ, s.v === 0);
-  updateFlag(s, flagN, (s.v & (1 << 7)) !== 0);
+  s.updateFlag(flagZ, s.v === 0);
+  s.updateFlag(flagN, (s.v & (1 << 7)) !== 0);
 };
 
 const fl_bit: CpuAction = s => {
-  updateFlag(s, flagZ, (s.v & s.a) === 0);
-  updateFlag(s, flagN, (s.v & (1 << 7)) !== 0);
-  updateFlag(s, flagV, (s.v & (1 << 6)) !== 0);
+  s.updateFlag(flagZ, (s.v & s.a) === 0);
+  s.updateFlag(flagN, (s.v & (1 << 7)) !== 0);
+  s.updateFlag(flagV, (s.v & (1 << 6)) !== 0);
 };
 
-function cmp_inner(s: CpuState, ref: number) {
+function cmp_inner(s: Proc6502, ref: number) {
   s.v = ref - s.v;
-  updateFlag(s, flagC, s.v >= 0);
+  s.updateFlag(flagC, s.v >= 0);
   s.v = s.v & 0xff;
-  updateFlag(s, flagZ, s.v === 0);
-  updateFlag(s, flagN, s.v >= 1 << 7);
+  s.updateFlag(flagZ, s.v === 0);
+  s.updateFlag(flagN, s.v >= 1 << 7);
 }
 
 const cmp_a: CpuAction = s => {

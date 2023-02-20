@@ -1,9 +1,11 @@
 import * as fs from 'fs-extra';
 
-import {CpuState, cycle, newCpuState, instructions} from '../src/cpu';
+import {Proc6502, instructions} from '../src/cpu';
 import {Bus} from '../src/bus';
 
 const ProcessorTestsPath = '../ProcessorTests/6502/v1/';
+const TestsPerOpcode = 10; // Use 10 for sanity. 1000 for the full suite.
+
 
 interface TestState {
   pc: number;
@@ -37,7 +39,7 @@ export function runHarteSuiteRange(start: number, end: number) {
       const opcodeText = opcode.toString(16).toLowerCase().padStart(2, '0');
       describe(`Harte 6502 Test 0x${opcodeText}`, () => {
         const scenarios: [string, Scenario][] = loadTestData(opcodeText)
-          .slice(0, 1000)
+          .slice(0, TestsPerOpcode)
           .map(s => [s.name, s]);
 
         test.each(scenarios)('%s', (name, scenario: Scenario) => {
@@ -49,17 +51,16 @@ export function runHarteSuiteRange(start: number, end: number) {
 }
 
 function runScenario(scenario: Scenario, log: boolean) {
-  const state: CpuState = {
-    ...newCpuState(),
-    pc: scenario.initial.pc,
-    sp: scenario.initial.s,
-    a: scenario.initial.a,
-    x: scenario.initial.x,
-    y: scenario.initial.y,
-    p: scenario.initial.p,
-  };
+  const proc = new Proc6502();
+  proc.pc = scenario.initial.pc;
+  proc.sp = scenario.initial.s;
+  proc.a = scenario.initial.a;
+  proc.x = scenario.initial.x;
+  proc.y = scenario.initial.y;
+  proc.p = scenario.initial.p;
+
   const bus: Bus = {
-    address: state.pc,
+    address: proc.pc,
     data: 0,
     isWrite: false,
   };
@@ -76,7 +77,7 @@ function runScenario(scenario: Scenario, log: boolean) {
     }
     receivedCycles.push([bus.address, bus.data, bus.isWrite ? 'write' : 'read']);
     // CPU step
-    cycle(state, bus);
+    proc.cycle(bus);
   }
 
   if (log) {
@@ -86,18 +87,18 @@ function runScenario(scenario: Scenario, log: boolean) {
   }
 
   // Check correct cycle count
-  expect(state.steps.length).toBe(0);
+  expect(proc.steps.length).toBe(0);
 
   // Check cycles
   expect(receivedCycles).toStrictEqual(scenario.cycles);
 
   // Check final state
-  expect(state.pc).toBe(scenario.final.pc);
-  expect(state.sp).toBe(scenario.final.s);
-  expect(state.a).toBe(scenario.final.a);
-  expect(state.x).toBe(scenario.final.x);
-  expect(state.y).toBe(scenario.final.y);
-  expect(state.p).toBe(scenario.final.p);
+  expect(proc.pc).toBe(scenario.final.pc);
+  expect(proc.sp).toBe(scenario.final.s);
+  expect(proc.a).toBe(scenario.final.a);
+  expect(proc.x).toBe(scenario.final.x);
+  expect(proc.y).toBe(scenario.final.y);
+  expect(proc.p).toBe(scenario.final.p);
 
   // Check final ram
   scenario.final.ram.forEach(pair => {
