@@ -14,7 +14,7 @@ export class Proc6502 {
   v2: number;
   w: number;
   w_carry: boolean;
-  pc_target: undefined | number;
+  pc_target?: number;
 
   // Execution flow
   opcode: number;
@@ -65,9 +65,9 @@ export class Proc6502 {
   }
 
   midInstruction(): boolean {
-    return this.steps.length != 0;
+    return this.steps.length !== 0;
   }
-  
+
   getFlag(flag: number): boolean {
     return (this.p & flag) !== 0;
   }

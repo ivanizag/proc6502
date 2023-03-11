@@ -6,7 +6,6 @@ import {Bus} from '../src/bus';
 const ProcessorTestsPath = '../ProcessorTests/6502/v1/';
 const TestsPerOpcode = 10; // Use 10 for sanity. 1000 for the full suite.
 
-
 interface TestState {
   pc: number;
   s: number;
