@@ -1,5 +1,4 @@
-import {Proc6502} from '../src/cpu';
-import {newBus} from '../src/bus';
+import {Proc6502, newBus} from '../src';
 
 test('PC increases by 1', () => {
   const proc = new Proc6502();

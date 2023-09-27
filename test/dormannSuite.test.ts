@@ -1,7 +1,7 @@
 import * as fs from 'fs-extra';
 
-import {Proc6502} from '../src/cpu';
-import {newBus} from '../src/bus';
+import {Proc6502, newBus} from '../src';
+
 
 // To execute test suite from https://github.com/Klaus2m5/6502_65C02_functional_tests
 test('Klaus Dormann', () => {

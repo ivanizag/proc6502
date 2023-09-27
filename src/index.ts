@@ -1,4 +1,16 @@
-import {Bus} from './bus';
+export interface Bus {
+  address: number;
+  data: number;
+  isWrite: boolean;
+}
+
+export function newBus(): Bus {
+  return {
+    address: 0,
+    data: 0,
+    isWrite: false,
+  };
+}
 
 export class Proc6502 {
   // Registers

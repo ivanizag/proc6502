@@ -1,7 +1,6 @@
 import * as fs from 'fs-extra';
 
-import {Proc6502, instructions} from '../src/cpu';
-import {Bus} from '../src/bus';
+import {Proc6502, Bus, instructions} from '../src';
 
 const ProcessorTestsPath = '../ProcessorTests/6502/v1/';
 const TestsPerOpcode = 10; // Use 10 for sanity. 1000 for the full suite.
